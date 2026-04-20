@@ -85,7 +85,7 @@ export function App() {
   return (
     <Box flexDirection="column">
       <Box marginBottom={1}>
-        <Text color="gray">sprite — a small hand for file work.</Text>
+        <Text>A small helping hand inside your computer.</Text>
       </Box>
 
       <Box flexDirection="column" marginBottom={1}>
@@ -173,7 +173,7 @@ function Login({ onLogin }: { onLogin: (key: string) => void }) {
   return (
     <Box flexDirection="column">
       <Box marginBottom={1}>
-        <Text color="gray">sprite — a small hand for file work.</Text>
+        <Text>A small helping hand inside your computer.</Text>
       </Box>
       <Text>No API key found. Paste your Anthropic API key:</Text>
       <Text color="gray" dimColor>
