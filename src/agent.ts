@@ -1,8 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { tools, executeTool } from "./tools.js";
 
-const client = new Anthropic();
-
 const MODEL = "claude-opus-4-7";
 
 const SYSTEM_PROMPT = `You are sprite, a coding assistant working in the user's current directory.
@@ -25,10 +23,12 @@ export type AgentEvent =
  * Returns the updated history.
  */
 export async function runTurn(
+  apiKey: string,
   history: Anthropic.MessageParam[],
   userMessage: string,
   onEvent: (e: AgentEvent) => void,
 ): Promise<Anthropic.MessageParam[]> {
+  const client = new Anthropic({ apiKey });
   const messages: Anthropic.MessageParam[] = [
     ...history,
     { role: "user", content: userMessage },

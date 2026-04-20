@@ -3,6 +3,7 @@ import { Box, Text, useApp } from "ink";
 import TextInput from "ink-text-input";
 import type Anthropic from "@anthropic-ai/sdk";
 import { runTurn, type AgentEvent } from "./agent.js";
+import { loadApiKey, saveApiKey, clearApiKey, configPath } from "./config.js";
 
 type DisplayLine =
   | { kind: "user"; text: string }
@@ -13,6 +14,7 @@ type DisplayLine =
 
 export function App() {
   const { exit } = useApp();
+  const [apiKey, setApiKey] = useState<string | undefined>(() => loadApiKey());
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [lines, setLines] = useState<DisplayLine[]>([]);
@@ -20,6 +22,17 @@ export function App() {
 
   const push = (line: DisplayLine) =>
     setLines((prev) => [...prev, line]);
+
+  if (!apiKey) {
+    return (
+      <Login
+        onLogin={(key) => {
+          saveApiKey(key);
+          setApiKey(key);
+        }}
+      />
+    );
+  }
 
   const handleEvent = (e: AgentEvent) => {
     if (e.type === "text") {
@@ -45,12 +58,21 @@ export function App() {
       return;
     }
 
+    if (text === "/logout") {
+      clearApiKey();
+      setInput("");
+      setApiKey(undefined);
+      setLines([]);
+      setHistory([]);
+      return;
+    }
+
     setInput("");
     setBusy(true);
     push({ kind: "user", text });
 
     try {
-      const newHistory = await runTurn(history, text, handleEvent);
+      const newHistory = await runTurn(apiKey, history, text, handleEvent);
       setHistory(newHistory);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -131,6 +153,43 @@ function Line({ line }: { line: DisplayLine }) {
         </Box>
       );
   }
+}
+
+function Login({ onLogin }: { onLogin: (key: string) => void }) {
+  const [value, setValue] = useState("");
+  const [error, setError] = useState<string | null>(null);
+
+  const submit = (v: string) => {
+    const key = v.trim();
+    if (!key) return;
+    if (!key.startsWith("sk-ant-")) {
+      setError("That doesn't look like an Anthropic key (expected sk-ant-…).");
+      return;
+    }
+    setError(null);
+    onLogin(key);
+  };
+
+  return (
+    <Box flexDirection="column">
+      <Box marginBottom={1}>
+        <Text color="gray">sprite — a small hand for file work.</Text>
+      </Box>
+      <Text>No API key found. Paste your Anthropic API key:</Text>
+      <Text color="gray" dimColor>
+        (saved to {configPath()}; env ANTHROPIC_API_KEY overrides)
+      </Text>
+      <Box marginTop={1}>
+        <Text color="cyan">key ❯ </Text>
+        <TextInput value={value} onChange={setValue} onSubmit={submit} mask="•" />
+      </Box>
+      {error && (
+        <Box marginTop={1}>
+          <Text color="red">{error}</Text>
+        </Box>
+      )}
+    </Box>
+  );
 }
 
 function truncate(s: string, max: number): string {

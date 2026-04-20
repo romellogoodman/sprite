@@ -4,7 +4,7 @@
   "description": "A CLI coding agent — an LLM in a loop with file tools.",
   "type": "module",
   "bin": {
-    "sprite": "./src/cli.tsx"
+    "sprite": "./bin/sprite.mjs"
   },
   "scripts": {
     "start": "tsx src/cli.tsx",

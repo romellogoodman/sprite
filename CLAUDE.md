@@ -32,10 +32,16 @@ Add `bash` / `grep` only once the three above are solid.
 
 ## Layout
 
+- `bin/sprite.mjs` — global-link shim (spawns local `tsx` with project tsconfig)
 - `src/cli.tsx` — entry point, renders `<App />`
-- `src/App.tsx` — Ink UI: conversation view + input prompt
+- `src/App.tsx` — Ink UI: login screen, conversation view, input prompt
 - `src/agent.ts` — `runTurn()`: the model ↔ tool loop
 - `src/tools.ts` — tool schemas + `executeTool()`
+- `src/config.ts` — API key persistence at `~/.config/sprite/config.json`
+
+## Auth
+
+Key resolution order: `ANTHROPIC_API_KEY` env → `~/.config/sprite/config.json`. If neither is set, sprite shows a login prompt on launch and saves the key (mode 0600). `/logout` clears it.
 
 ## Principles
 
