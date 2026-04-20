@@ -62,6 +62,10 @@ export function App() {
 
   return (
     <Box flexDirection="column">
+      <Box marginBottom={1}>
+        <Text color="gray">sprite — a small hand for file work.</Text>
+      </Box>
+
       <Box flexDirection="column" marginBottom={1}>
         {lines.map((line, i) => (
           <Line key={i} line={line} />
