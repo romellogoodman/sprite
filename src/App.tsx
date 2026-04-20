@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Box, Text, useApp } from "ink";
 import TextInput from "ink-text-input";
+import Spinner from "ink-spinner";
 import type Anthropic from "@anthropic-ai/sdk";
 import { runTurn, type AgentEvent } from "./agent.js";
 import { loadApiKey, saveApiKey, clearApiKey, configPath } from "./config.js";
@@ -95,16 +96,23 @@ export function App() {
       </Box>
 
       <Box>
-        <Text color={busy ? "gray" : "cyan"}>{busy ? "… " : "❯ "}</Text>
         {busy ? (
-          <Text color="gray">thinking</Text>
+          <>
+            <Text color="cyan">
+              <Spinner type="dots" />
+            </Text>
+            <Text> working…</Text>
+          </>
         ) : (
-          <TextInput
-            value={input}
-            onChange={setInput}
-            onSubmit={handleSubmit}
-            placeholder="ask sprite anything (or 'exit')"
-          />
+          <>
+            <Text color="cyan">❯ </Text>
+            <TextInput
+              value={input}
+              onChange={setInput}
+              onSubmit={handleSubmit}
+              placeholder="ask sprite anything (or 'exit')"
+            />
+          </>
         )}
       </Box>
     </Box>
