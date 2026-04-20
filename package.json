@@ -1,0 +1,29 @@
+{
+  "name": "sprite",
+  "version": "0.0.1",
+  "description": "A CLI coding agent — an LLM in a loop with file tools.",
+  "type": "module",
+  "bin": {
+    "sprite": "./src/cli.tsx"
+  },
+  "scripts": {
+    "start": "tsx src/cli.tsx",
+    "dev": "tsx watch src/cli.tsx",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "0.90.0",
+    "ink": "6.8.0",
+    "ink-text-input": "6.0.0",
+    "react": "19.2.4"
+  },
+  "devDependencies": {
+    "@types/node": "25.5.0",
+    "@types/react": "19.2.14",
+    "tsx": "4.21.0",
+    "typescript": "5.9.3"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

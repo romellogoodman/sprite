@@ -1,34 +1,50 @@
-# Project Guidelines
+# sprite
 
-This is a React.js app with SCSS styles.
+A CLI coding agent — an LLM in a loop with file tools.
 
-## File Structure
+## Architecture
 
-- All React components should be placed in `src/App.jsx`
-- All styles should be placed in `src/App.scss`
+Core loop:
+1. Read user input
+2. Send conversation history + tool definitions to Claude
+3. If the response contains `tool_use` blocks, execute them locally and append `tool_result` blocks to the conversation
+4. Repeat 2–3 until Claude responds without tool calls
+5. Print the response; go to 1
 
-This single-file approach is intentional for rapid prototyping. Refactor into multiple files as the prototype grows.
+The model never touches the filesystem directly — it requests, the loop executes.
 
-## CSS/SCSS Conventions
+## Tools
 
-- Use BEM (Block Element Modifier) naming: `.block__element--modifier`
-- Use SCSS nesting with `&` for organization
-- Use the CSS custom properties defined at the top of `src/App.scss` for colors, spacing, and typography — do not hardcode values
+Start minimal:
+- `read_file(path)` — return file contents
+- `list_files(path?)` — return directory listing
+- `edit_file(path, old_str, new_str)` — string-replace edit; creates the file if it doesn't exist
 
-```scss
-.card {
-  padding: var(--spacing-2x);
+Add `bash` / `grep` only once the three above are solid.
 
-  &__title {
-    font-size: var(--font-size-xl);
+## Stack
 
-    &--large { font-size: calc(var(--font-size-xl) * 1.5); }
-  }
-}
-```
+- TypeScript / Node (ESM)
+- `@anthropic-ai/sdk` for the model
+- `ink` + `react` for the terminal UI
+- Run: `npm start` (via `tsx`)
+- Typecheck: `npm run typecheck`
 
-## Environment Variables
+## Layout
 
-- Copy `.env.example` to `.env.local` for local configuration
-- All Vite environment variables must be prefixed with `VITE_`
-- Access in code via `import.meta.env.VITE_*`
+- `src/cli.tsx` — entry point, renders `<App />`
+- `src/App.tsx` — Ink UI: conversation view + input prompt
+- `src/agent.ts` — `runTurn()`: the model ↔ tool loop
+- `src/tools.ts` — tool schemas + `executeTool()`
+
+## Principles
+
+- Keep the loop small. Complexity belongs in tool implementations, not orchestration.
+- Tool descriptions are load-bearing — the model reasons from them. Write them with care.
+- The client owns conversation state; resend the full history every turn.
+- No agent framework. If you reach for one, reread the references.
+
+## References
+
+- https://ampcode.com/notes/how-to-build-an-agent
+- https://www.mihaileric.com/The-Emperor-Has-No-Clothes/
