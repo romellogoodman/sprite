@@ -42,8 +42,13 @@ function loadProjectContext(cwd: string = process.cwd()): string {
   );
 }
 
-export function buildSystemPrompt(cwd?: string): string {
-  return BASE_SYSTEM_PROMPT + loadProjectContext(cwd);
+function buildEnvironment(cwd: string): string {
+  const today = new Date().toISOString().slice(0, 10);
+  return `\n\nEnvironment:\n- Working directory: ${cwd}\n- Today's date: ${today}`;
+}
+
+export function buildSystemPrompt(cwd: string = process.cwd()): string {
+  return BASE_SYSTEM_PROMPT + buildEnvironment(cwd) + loadProjectContext(cwd);
 }
 
 export type AgentEvent =
