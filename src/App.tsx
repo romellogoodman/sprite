@@ -1,10 +1,19 @@
-import { useState } from "react";
-import { Box, Text, useApp } from "ink";
+import { useRef, useState } from "react";
+import { Box, Text, useApp, useInput } from "ink";
 import TextInput from "ink-text-input";
 import Spinner from "ink-spinner";
 import type Anthropic from "@anthropic-ai/sdk";
 import { runTurn, type AgentEvent } from "./agent.js";
-import { loadApiKey, saveApiKey, clearApiKey, configPath } from "./config.js";
+import type { BashApproval, ToolContext } from "./tools.js";
+import {
+  loadApiKey,
+  saveApiKey,
+  clearApiKey,
+  configPath,
+  isBashAllowed,
+  allowBashPrefix,
+  suggestBashPrefix,
+} from "./config.js";
 
 type DisplayLine =
   | { kind: "user"; text: string }
@@ -13,16 +22,48 @@ type DisplayLine =
   | { kind: "result"; name: string; output: string; isError: boolean }
   | { kind: "error"; text: string };
 
-export function App() {
+type PendingBash = {
+  command: string;
+  resolve: (a: BashApproval) => void;
+};
+
+export function App({ trust = false }: { trust?: boolean }) {
   const { exit } = useApp();
   const [apiKey, setApiKey] = useState<string | undefined>(() => loadApiKey());
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [lines, setLines] = useState<DisplayLine[]>([]);
   const [history, setHistory] = useState<Anthropic.MessageParam[]>([]);
+  const [pendingBash, setPendingBash] = useState<PendingBash | null>(null);
 
   const push = (line: DisplayLine) =>
     setLines((prev) => [...prev, line]);
+
+  const toolCtx = useRef<ToolContext>({
+    trust,
+    isAllowed: isBashAllowed,
+    allowPrefix: allowBashPrefix,
+    suggestPrefix: suggestBashPrefix,
+    confirmBash: (command) =>
+      new Promise<BashApproval>((resolve) => {
+        setPendingBash({ command, resolve });
+      }),
+  }).current;
+
+  useInput(
+    (ch) => {
+      if (!pendingBash) return;
+      const c = ch.toLowerCase();
+      if (c === "y" || c === "a" || c === "n") {
+        const answer: BashApproval =
+          c === "y" ? "yes" : c === "a" ? "always" : "no";
+        const { resolve } = pendingBash;
+        setPendingBash(null);
+        resolve(answer);
+      }
+    },
+    { isActive: pendingBash !== null },
+  );
 
   if (!apiKey) {
     return (
@@ -80,7 +121,7 @@ export function App() {
     push({ kind: "user", text });
 
     try {
-      const newHistory = await runTurn(apiKey, history, text, handleEvent);
+      const newHistory = await runTurn(apiKey, history, text, toolCtx, handleEvent);
       setHistory(newHistory);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -103,7 +144,9 @@ export function App() {
       </Box>
 
       <Box>
-        {busy ? (
+        {pendingBash ? (
+          <BashConfirm command={pendingBash.command} />
+        ) : busy ? (
           <>
             <Text color="cyan">
               <Spinner type="dots" />
@@ -168,6 +211,29 @@ function Line({ line }: { line: DisplayLine }) {
         </Box>
       );
   }
+}
+
+function BashConfirm({ command }: { command: string }) {
+  const prefix = suggestBashPrefix(command);
+  return (
+    <Box flexDirection="column" borderStyle="round" borderColor="yellow" paddingX={1}>
+      <Text>
+        sprite wants to run: <Text color="yellow">{command}</Text>
+      </Text>
+      <Box marginTop={1} flexDirection="column">
+        <Text>
+          <Text color="cyan">[y]</Text> run once
+        </Text>
+        <Text>
+          <Text color="cyan">[a]</Text> always allow{" "}
+          <Text color="gray">"{prefix} …" in this project</Text>
+        </Text>
+        <Text>
+          <Text color="cyan">[n]</Text> deny
+        </Text>
+      </Box>
+    </Box>
+  );
 }
 
 function Login({ onLogin }: { onLogin: (key: string) => void }) {

@@ -2,4 +2,6 @@
 import { render } from "ink";
 import { App } from "./App.js";
 
-render(<App />);
+const trust = process.argv.includes("--trust");
+
+render(<App trust={trust} />);

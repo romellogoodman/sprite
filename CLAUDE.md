@@ -43,6 +43,10 @@ Four tools, no more. Anything else sprite needs, it can do via `bash` or by writ
 
 Key resolution order: `ANTHROPIC_API_KEY` env → `~/.config/sprite/config.json`. If neither is set, sprite shows a login prompt on launch and saves the key (mode 0600). `/logout` clears it.
 
+## Permissions
+
+`bash` commands prompt for confirmation (`[y]` once / `[a]` always / `[n]` deny). "Always" saves a command prefix to `.sprite/settings.json` in the cwd so that project trusts it going forward. `sprite --trust` skips all confirmations.
+
 ## Principles
 
 - Keep the loop small. Complexity belongs in tool implementations, not orchestration.

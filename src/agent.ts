@@ -1,5 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { tools, executeTool } from "./tools.js";
+import { tools, executeTool, type ToolContext } from "./tools.js";
 
 const MODEL = "claude-opus-4-7";
 
@@ -26,6 +26,7 @@ export async function runTurn(
   apiKey: string,
   history: Anthropic.MessageParam[],
   userMessage: string,
+  ctx: ToolContext,
   onEvent: (e: AgentEvent) => void,
 ): Promise<Anthropic.MessageParam[]> {
   const client = new Anthropic({ apiKey });
@@ -69,9 +70,14 @@ export async function runTurn(
       return messages;
     }
 
-    const toolResults: Anthropic.ToolResultBlockParam[] = toolUses.map((tu) => {
+    const toolResults: Anthropic.ToolResultBlockParam[] = [];
+    for (const tu of toolUses) {
       try {
-        const output = executeTool(tu.name, tu.input as Record<string, unknown>);
+        const output = await executeTool(
+          tu.name,
+          tu.input as Record<string, unknown>,
+          ctx,
+        );
         onEvent({
           type: "tool_result",
           id: tu.id,
@@ -79,7 +85,11 @@ export async function runTurn(
           output,
           isError: false,
         });
-        return { type: "tool_result", tool_use_id: tu.id, content: output };
+        toolResults.push({
+          type: "tool_result",
+          tool_use_id: tu.id,
+          content: output,
+        });
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         onEvent({
@@ -89,14 +99,14 @@ export async function runTurn(
           output: msg,
           isError: true,
         });
-        return {
+        toolResults.push({
           type: "tool_result",
           tool_use_id: tu.id,
           content: msg,
           is_error: true,
-        };
+        });
       }
-    });
+    }
 
     messages.push({ role: "user", content: toolResults });
   }

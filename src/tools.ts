@@ -78,7 +78,26 @@ export const tools: Anthropic.Tool[] = [
 
 type ToolInput = Record<string, unknown>;
 
-export function executeTool(name: string, input: ToolInput): string {
+export type BashApproval = "yes" | "always" | "no";
+
+export type ToolContext = {
+  /** Skip all confirmations (--trust). */
+  trust: boolean;
+  /** Ask the user to approve a bash command. Returns their choice. */
+  confirmBash: (command: string) => Promise<BashApproval>;
+  /** Persist a prefix to the project allowlist. */
+  allowPrefix: (prefix: string) => void;
+  /** Check the project allowlist. */
+  isAllowed: (command: string) => boolean;
+  /** Derive a prefix to save for "always". */
+  suggestPrefix: (command: string) => string;
+};
+
+export async function executeTool(
+  name: string,
+  input: ToolInput,
+  ctx: ToolContext,
+): Promise<string> {
   switch (name) {
     case "read_file":
       return readFile(String(input.path));
@@ -91,10 +110,23 @@ export function executeTool(name: string, input: ToolInput): string {
         String(input.new_str),
       );
     case "bash":
-      return bash(String(input.command));
+      return runBash(String(input.command), ctx);
     default:
       throw new Error(`Unknown tool: ${name}`);
   }
+}
+
+async function runBash(command: string, ctx: ToolContext): Promise<string> {
+  if (!ctx.trust && !ctx.isAllowed(command)) {
+    const choice = await ctx.confirmBash(command);
+    if (choice === "no") {
+      throw new Error("Command denied by user.");
+    }
+    if (choice === "always") {
+      ctx.allowPrefix(ctx.suggestPrefix(command));
+    }
+  }
+  return bash(command);
 }
 
 function readFile(relPath: string): string {
