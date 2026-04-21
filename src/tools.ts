@@ -78,6 +78,15 @@ export const tools: Anthropic.Tool[] = [
 
 type ToolInput = Record<string, unknown>;
 
+const MAX_OUTPUT = 50_000;
+
+function cap(s: string): string {
+  if (s.length <= MAX_OUTPUT) return s;
+  const half = Math.floor(MAX_OUTPUT / 2);
+  const omitted = s.length - 2 * half;
+  return `${s.slice(0, half)}\n\n[... ${omitted} bytes truncated by sprite ...]\n\n${s.slice(-half)}`;
+}
+
 export type BashApproval = "yes" | "always" | "no";
 
 export type ToolContext = {
@@ -100,9 +109,9 @@ export async function executeTool(
 ): Promise<string> {
   switch (name) {
     case "read_file":
-      return readFile(String(input.path));
+      return cap(readFile(String(input.path)));
     case "list_files":
-      return listFiles(input.path ? String(input.path) : ".");
+      return cap(listFiles(input.path ? String(input.path) : "."));
     case "edit_file":
       return editFile(
         String(input.path),
@@ -110,7 +119,7 @@ export async function executeTool(
         String(input.new_str),
       );
     case "bash":
-      return runBash(String(input.command), ctx);
+      return cap(await runBash(String(input.command), ctx));
     default:
       throw new Error(`Unknown tool: ${name}`);
   }
