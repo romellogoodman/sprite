@@ -5,6 +5,7 @@ import Spinner from "ink-spinner";
 import type Anthropic from "@anthropic-ai/sdk";
 import { runTurn, type AgentEvent } from "./agent.js";
 import type { BashApproval, ToolContext } from "./tools.js";
+import { PromptInput } from "./PromptInput.js";
 import {
   loadApiKey,
   saveApiKey,
@@ -34,6 +35,7 @@ export function App({ trust = false }: { trust?: boolean }) {
   const [busy, setBusy] = useState(false);
   const [lines, setLines] = useState<DisplayLine[]>([]);
   const [history, setHistory] = useState<Anthropic.MessageParam[]>([]);
+  const [inputHistory, setInputHistory] = useState<string[]>([]);
   const [pendingBash, setPendingBash] = useState<PendingBash | null>(null);
 
   const push = (line: DisplayLine) =>
@@ -117,6 +119,7 @@ export function App({ trust = false }: { trust?: boolean }) {
     }
 
     setInput("");
+    setInputHistory((h) => (h[h.length - 1] === text ? h : [...h, text]));
     setBusy(true);
     push({ kind: "user", text });
 
@@ -156,10 +159,11 @@ export function App({ trust = false }: { trust?: boolean }) {
         ) : (
           <>
             <Text color="cyan">❯ </Text>
-            <TextInput
+            <PromptInput
               value={input}
               onChange={setInput}
               onSubmit={handleSubmit}
+              history={inputHistory}
               placeholder="ask sprite anything (or 'exit')"
             />
           </>
