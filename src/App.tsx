@@ -59,6 +59,13 @@ export function App() {
       return;
     }
 
+    if (text === "/clear") {
+      setInput("");
+      setLines([]);
+      setHistory([]);
+      return;
+    }
+
     if (text === "/logout") {
       clearApiKey();
       setInput("");
