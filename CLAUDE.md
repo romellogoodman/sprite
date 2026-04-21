@@ -15,12 +15,12 @@ The model never touches the filesystem directly — it requests, the loop execut
 
 ## Tools
 
-Start minimal:
 - `read_file(path)` — return file contents
 - `list_files(path?)` — return directory listing
 - `edit_file(path, old_str, new_str)` — string-replace edit; creates the file if it doesn't exist
+- `bash(command)` — run a shell command (120s timeout)
 
-Add `bash` / `grep` only once the three above are solid.
+Four tools, no more. Anything else sprite needs, it can do via `bash` or by writing a script into the project.
 
 ## Stack
 

@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
 import type Anthropic from "@anthropic-ai/sdk";
 
 export const tools: Anthropic.Tool[] = [
@@ -58,6 +59,21 @@ export const tools: Anthropic.Tool[] = [
       required: ["path", "old_str", "new_str"],
     },
   },
+  {
+    name: "bash",
+    description:
+      "Run a shell command in the current working directory and return its combined stdout/stderr. Use this for anything the file tools can't do: grep, git, running tests, installing packages, etc. Commands time out after 120s.",
+    input_schema: {
+      type: "object",
+      properties: {
+        command: {
+          type: "string",
+          description: "The shell command to execute.",
+        },
+      },
+      required: ["command"],
+    },
+  },
 ];
 
 type ToolInput = Record<string, unknown>;
@@ -74,6 +90,8 @@ export function executeTool(name: string, input: ToolInput): string {
         String(input.old_str),
         String(input.new_str),
       );
+    case "bash":
+      return bash(String(input.command));
     default:
       throw new Error(`Unknown tool: ${name}`);
   }
@@ -121,4 +139,26 @@ function editFile(relPath: string, oldStr: string, newStr: string): string {
 
   fs.writeFileSync(relPath, content.replace(oldStr, newStr), "utf8");
   return `Edited ${relPath}`;
+}
+
+function bash(command: string): string {
+  const result = spawnSync(command, {
+    shell: true,
+    encoding: "utf8",
+    timeout: 120_000,
+    maxBuffer: 10 * 1024 * 1024,
+  });
+
+  if (result.error) {
+    throw result.error;
+  }
+
+  const out = [result.stdout, result.stderr].filter(Boolean).join("");
+  const exit = result.status ?? (result.signal ? `signal ${result.signal}` : 0);
+
+  if (result.status !== 0) {
+    throw new Error(`exit ${exit}\n${out || "(no output)"}`);
+  }
+
+  return out || "(no output)";
 }

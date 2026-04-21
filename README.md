@@ -2,7 +2,7 @@
 
 A small helping hand inside your computer.
 
-A CLI coding agent: an LLM in a loop with three file tools — `read_file`, `list_files`, `edit_file`. It works in whatever directory you run it from.
+A CLI coding agent: an LLM in a loop with four tools — `read_file`, `list_files`, `edit_file`, `bash`. It works in whatever directory you run it from.
 
 ## Run
 
