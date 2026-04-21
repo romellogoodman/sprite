@@ -1,15 +1,50 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import Anthropic from "@anthropic-ai/sdk";
 import { tools, executeTool, type ToolContext } from "./tools.js";
 
 const MODEL = "claude-opus-4-7";
 
-const SYSTEM_PROMPT = `You are sprite, a coding assistant working in the user's current directory.
+const BASE_SYSTEM_PROMPT = `You are sprite, a coding assistant working in the user's current directory.
 
 You have four tools: read_file, list_files, edit_file, bash. Read before you edit. Reach for bash when the file tools can't do it — running tests, grep, git, installs. When you change something, say what changed and why in one line.
 
 Be practical. Short answers — this is a terminal. Prefer showing the work to explaining it. If a request is ambiguous and the choice matters, ask one short question and wait. If it's minor, pick the smallest reasonable interpretation and say what you assumed.
 
 Pay attention to what the code is trying to do, not just what it says. Small, careful edits over large rewrites.`;
+
+/**
+ * Load project-level instructions from AGENTS.md / AGENT.md / CLAUDE.md in cwd.
+ * All three names are checked; duplicate contents (e.g. symlinks) are included
+ * once. Missing or unreadable files are skipped silently.
+ */
+function loadProjectContext(cwd: string = process.cwd()): string {
+  const files = ["AGENTS.md", "AGENT.md", "CLAUDE.md"];
+  const seen = new Set<string>();
+  const sections: string[] = [];
+
+  for (const name of files) {
+    try {
+      const body = readFileSync(path.join(cwd, name), "utf8").trim();
+      if (!body || seen.has(body)) continue;
+      seen.add(body);
+      sections.push(`--- ${name} ---\n${body}`);
+    } catch {
+      // file missing or unreadable; skip
+    }
+  }
+
+  if (sections.length === 0) return "";
+  return (
+    `\n\nThe following project instructions were loaded from the working directory. ` +
+    `Treat them as authoritative guidance for this project.\n\n` +
+    sections.join("\n\n")
+  );
+}
+
+export function buildSystemPrompt(cwd?: string): string {
+  return BASE_SYSTEM_PROMPT + loadProjectContext(cwd);
+}
 
 export type AgentEvent =
   | { type: "text"; text: string }
@@ -30,6 +65,7 @@ export async function runTurn(
   onEvent: (e: AgentEvent) => void,
 ): Promise<Anthropic.MessageParam[]> {
   const client = new Anthropic({ apiKey });
+  const system = buildSystemPrompt();
   const messages: Anthropic.MessageParam[] = [
     ...history,
     { role: "user", content: userMessage },
@@ -42,7 +78,7 @@ export async function runTurn(
       thinking: { type: "adaptive" },
       output_config: { effort: "xhigh" },
       cache_control: { type: "ephemeral" },
-      system: SYSTEM_PROMPT,
+      system,
       tools,
       messages,
     });
