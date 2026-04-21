@@ -1,7 +1,8 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, existsSync } from "node:fs";
 import path from "node:path";
 import Anthropic from "@anthropic-ai/sdk";
 import { tools, executeTool, type ToolContext } from "./tools.js";
+import { configDir } from "./config.js";
 
 const MODEL = "claude-opus-4-7";
 
@@ -14,30 +15,49 @@ Be practical. Short answers — this is a terminal. Prefer showing the work to e
 Pay attention to what the code is trying to do, not just what it says. Small, careful edits over large rewrites.`;
 
 /**
- * Load project-level instructions from AGENTS.md / AGENT.md / CLAUDE.md in cwd.
- * All three names are checked; duplicate contents (e.g. symlinks) are included
- * once. Missing or unreadable files are skipped silently.
+ * Load project instructions from AGENTS.md / AGENT.md / CLAUDE.md.
+ *
+ * Searches ~/.config/sprite/ (global), then walks from the git root down to
+ * cwd so inner files come last. Stops the upward walk at the first directory
+ * containing `.git`, or at the filesystem root. Duplicate contents (e.g. via
+ * symlinks) are included once. Missing files are skipped silently.
  */
 function loadProjectContext(cwd: string = process.cwd()): string {
-  const files = ["AGENTS.md", "AGENT.md", "CLAUDE.md"];
+  const names = ["AGENTS.md", "AGENT.md", "CLAUDE.md"];
   const seen = new Set<string>();
   const sections: string[] = [];
 
-  for (const name of files) {
-    try {
-      const body = readFileSync(path.join(cwd, name), "utf8").trim();
-      if (!body || seen.has(body)) continue;
-      seen.add(body);
-      sections.push(`--- ${name} ---\n${body}`);
-    } catch {
-      // file missing or unreadable; skip
+  const tryLoad = (dir: string) => {
+    for (const name of names) {
+      try {
+        const full = path.join(dir, name);
+        const body = readFileSync(full, "utf8").trim();
+        if (!body || seen.has(body)) continue;
+        seen.add(body);
+        sections.push(`--- ${full} ---\n${body}`);
+      } catch {
+        // missing or unreadable; skip
+      }
     }
+  };
+
+  tryLoad(configDir());
+
+  const ancestors: string[] = [];
+  let dir = path.resolve(cwd);
+  for (;;) {
+    ancestors.push(dir);
+    if (existsSync(path.join(dir, ".git"))) break;
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
   }
+  for (const d of ancestors.reverse()) tryLoad(d);
 
   if (sections.length === 0) return "";
   return (
-    `\n\nThe following project instructions were loaded from the working directory. ` +
-    `Treat them as authoritative guidance for this project.\n\n` +
+    `\n\nThe following project instructions were found. ` +
+    `Treat them as authoritative guidance; later sections are more specific and take precedence.\n\n` +
     sections.join("\n\n")
   );
 }

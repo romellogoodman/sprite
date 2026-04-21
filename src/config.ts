@@ -44,6 +44,10 @@ export function configPath(): string {
   return CONFIG_PATH;
 }
 
+export function configDir(): string {
+  return CONFIG_DIR;
+}
+
 // --- per-project bash allowlist, stored in the USER config dir ---
 // Keyed by absolute cwd so a cloned repo can't pre-seed its own allowances.
 
