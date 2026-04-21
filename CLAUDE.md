@@ -45,7 +45,7 @@ Key resolution order: `ANTHROPIC_API_KEY` env → `~/.config/sprite/config.json`
 
 ## Permissions
 
-`bash` commands prompt for confirmation (`[y]` once / `[a]` always / `[n]` deny). "Always" saves a command prefix to `.sprite/settings.json` in the cwd so that project trusts it going forward. `sprite --trust` skips all confirmations.
+`bash` commands prompt for confirmation (`[y]` once / `[a]` always / `[n]` deny). "Always" saves a command prefix to `~/.config/sprite/projects.json`, keyed by the project's absolute path — the allowlist lives in the user's home, not the repo, so a cloned project can't pre-seed its own permissions. Commands containing shell operators (`;`, `&&`, `|`, `$(`, etc.) always prompt regardless of the allowlist. `sprite --trust` skips all confirmations.
 
 ## Principles
 

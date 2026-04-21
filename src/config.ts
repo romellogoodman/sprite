@@ -44,38 +44,56 @@ export function configPath(): string {
   return CONFIG_PATH;
 }
 
-// --- project-local settings (.sprite/settings.json in cwd) ---
+// --- per-project bash allowlist, stored in the USER config dir ---
+// Keyed by absolute cwd so a cloned repo can't pre-seed its own allowances.
 
-const PROJECT_DIR = path.join(process.cwd(), ".sprite");
-const PROJECT_SETTINGS = path.join(PROJECT_DIR, "settings.json");
+const PROJECTS_PATH = path.join(CONFIG_DIR, "projects.json");
 
 type ProjectSettings = {
   allowBash?: string[];
 };
 
-function readProjectSettings(): ProjectSettings {
+type ProjectsFile = Record<string, ProjectSettings>;
+
+function projectKey(): string {
+  return fs.realpathSync(process.cwd());
+}
+
+function readProjects(): ProjectsFile {
   try {
-    return JSON.parse(fs.readFileSync(PROJECT_SETTINGS, "utf8")) as ProjectSettings;
+    return JSON.parse(fs.readFileSync(PROJECTS_PATH, "utf8")) as ProjectsFile;
   } catch {
     return {};
   }
 }
 
-function writeProjectSettings(s: ProjectSettings): void {
-  fs.mkdirSync(PROJECT_DIR, { recursive: true });
-  fs.writeFileSync(PROJECT_SETTINGS, JSON.stringify(s, null, 2) + "\n");
+function writeProjects(p: ProjectsFile): void {
+  fs.mkdirSync(CONFIG_DIR, { recursive: true });
+  fs.writeFileSync(PROJECTS_PATH, JSON.stringify(p, null, 2) + "\n", {
+    mode: 0o600,
+  });
 }
 
+// Shell control operators — commands containing these always require
+// confirmation so an allowed prefix can't be chained into something else.
+const SHELL_META = /[;&|`<>\n]|\$\(/;
+
 export function isBashAllowed(command: string): boolean {
-  const allow = readProjectSettings().allowBash ?? [];
-  return allow.some((prefix) => command.startsWith(prefix));
+  if (SHELL_META.test(command)) return false;
+  const allow = readProjects()[projectKey()]?.allowBash ?? [];
+  return allow.some((p) => p.trim().length > 0 && command.startsWith(p));
 }
 
 export function allowBashPrefix(prefix: string): void {
-  const s = readProjectSettings();
-  const allow = s.allowBash ?? [];
-  if (!allow.includes(prefix)) allow.push(prefix);
-  writeProjectSettings({ ...s, allowBash: allow });
+  const clean = prefix.trim();
+  if (!clean) return;
+  const all = readProjects();
+  const key = projectKey();
+  const entry = all[key] ?? {};
+  const allow = entry.allowBash ?? [];
+  if (!allow.includes(clean)) allow.push(clean);
+  all[key] = { ...entry, allowBash: allow };
+  writeProjects(all);
 }
 
 /** Suggest a reasonable prefix to save for "always allow": first two words. */

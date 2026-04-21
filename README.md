@@ -21,7 +21,7 @@ sprite
 
 First launch will ask for an Anthropic API key. It's saved to `~/.config/sprite/config.json` (or set `ANTHROPIC_API_KEY` to skip the prompt). Type `/logout` to clear it, `/clear` to reset the conversation, `exit` to quit.
 
-Shell commands prompt for confirmation before running. Choosing "always" saves the command prefix to `.sprite/settings.json` in the current directory. Run `sprite --trust` to skip confirmations entirely.
+Shell commands prompt for confirmation before running. Choosing "always" remembers the command prefix for this project (stored in `~/.config/sprite/projects.json`). Run `sprite --trust` to skip confirmations entirely.
 
 ## Dev
 
