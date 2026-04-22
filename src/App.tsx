@@ -20,8 +20,7 @@ import {
 type DisplayLine =
   | { kind: "user"; text: string }
   | { kind: "assistant"; text: string }
-  | { kind: "tool"; name: string; input: string }
-  | { kind: "result"; name: string; output: string; isError: boolean }
+  | { kind: "tool"; id: string; name: string; input: string; output?: string; isError?: boolean }
   | { kind: "error"; text: string };
 
 type PendingBash = {
@@ -96,14 +95,15 @@ export function App({
     if (e.type === "text") {
       push({ kind: "assistant", text: e.text });
     } else if (e.type === "tool_use") {
-      push({ kind: "tool", name: e.name, input: JSON.stringify(e.input) });
+      push({ kind: "tool", id: e.id, name: e.name, input: summarizeInput(e.name, e.input) });
     } else if (e.type === "tool_result") {
-      push({
-        kind: "result",
-        name: e.name,
-        output: truncate(e.output, 500),
-        isError: e.isError,
-      });
+      setLines((prev) =>
+        prev.map((l) =>
+          l.kind === "tool" && l.id === e.id
+            ? { ...l, output: truncate(e.output, 500), isError: e.isError }
+            : l,
+        ),
+      );
     }
   };
 
@@ -158,10 +158,10 @@ export function App({
       setInputHistory((h) => (h[h.length - 1] === `!${cmd}` ? h : [...h, `!${cmd}`]));
       push({ kind: "user", text: `! ${cmd}` });
       try {
-        push({ kind: "result", name: `$ ${cmd}`, output: bash(cmd), isError: false });
+        push({ kind: "tool", id: "", name: "$", input: cmd, output: bash(cmd), isError: false });
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        push({ kind: "result", name: `$ ${cmd}`, output: msg, isError: true });
+        push({ kind: "tool", id: "", name: "$", input: cmd, output: msg, isError: true });
       }
       return;
     }
@@ -194,9 +194,7 @@ export function App({
 
   return (
     <Box flexDirection="column">
-      <Box marginTop={1} marginBottom={1}>
-        <Text>A small helping hand inside your computer.</Text>
-      </Box>
+      <Header />
 
       <Box flexDirection="column" marginBottom={1}>
         {lines.map((line, i) => (
@@ -245,6 +243,33 @@ export function App({
   );
 }
 
+function Header() {
+  const cwd = process.cwd();
+  const home = process.env.HOME ?? "";
+  const pretty = home && cwd.startsWith(home) ? "~" + cwd.slice(home.length) : cwd;
+  return (
+    <Box
+      flexDirection="column"
+      borderStyle="round"
+      borderColor="cyan"
+      paddingX={1}
+      marginTop={1}
+      marginBottom={1}
+    >
+      <Text>
+        <Text color="cyan" bold>sprite</Text>
+        <Text dimColor> · a small helping hand inside your computer</Text>
+      </Text>
+      <Text dimColor>cwd: {pretty}</Text>
+      <Box marginTop={1}>
+        <Text dimColor>
+          <Text color="cyan">!</Text> shell  <Text color="cyan">@</Text> file  <Text color="cyan">/</Text> commands  <Text color="cyan">↑↓</Text> history
+        </Text>
+      </Box>
+    </Box>
+  );
+}
+
 function Line({ line }: { line: DisplayLine }) {
   switch (line.kind) {
     case "user":
@@ -260,26 +285,24 @@ function Line({ line }: { line: DisplayLine }) {
           <Text>{line.text}</Text>
         </Box>
       );
-    case "tool":
+    case "tool": {
+      const done = line.output !== undefined;
+      const mark = !done ? "●" : line.isError ? "✗" : "●";
+      const color = !done ? "yellow" : line.isError ? "red" : "green";
       return (
-        <Box marginLeft={2}>
-          <Text color="yellow">⚙ {line.name}</Text>
-          <Text dimColor> {line.input}</Text>
-        </Box>
-      );
-    case "result":
-      return (
-        <Box marginLeft={2} flexDirection="column">
-          <Text color={line.isError ? "red" : "green"}>
-            {line.isError ? "✗" : "✓"} {line.name}
+        <Box marginLeft={2} marginTop={1} flexDirection="column">
+          <Text>
+            <Text color={color}>{mark}</Text> <Text bold>{line.name}</Text>
+            {line.input ? <Text dimColor> {line.input}</Text> : null}
           </Text>
-          <Box marginLeft={2}>
-            <Text dimColor>
-              {line.output}
-            </Text>
-          </Box>
+          {done && (
+            <Box marginLeft={2}>
+              <Text dimColor>{clip(line.output!)}</Text>
+            </Box>
+          )}
         </Box>
       );
+    }
     case "error":
       return (
         <Box marginTop={1}>
@@ -329,8 +352,18 @@ function Login({ onLogin }: { onLogin: (key: string) => void }) {
 
   return (
     <Box flexDirection="column">
-      <Box marginTop={1} marginBottom={1}>
-        <Text>A small helping hand inside your computer.</Text>
+      <Box
+        flexDirection="column"
+        borderStyle="round"
+        borderColor="cyan"
+        paddingX={1}
+        marginTop={1}
+        marginBottom={1}
+      >
+        <Text>
+          <Text color="cyan" bold>sprite</Text>
+          <Text dimColor> · a small helping hand inside your computer</Text>
+        </Text>
       </Box>
       <Text>No API key found. Paste your Anthropic API key:</Text>
       <Text dimColor>
@@ -352,4 +385,20 @@ function Login({ onLogin }: { onLogin: (key: string) => void }) {
 function truncate(s: string, max: number): string {
   if (s.length <= max) return s;
   return s.slice(0, max) + `… (${s.length - max} more chars)`;
+}
+
+/** One-line summary of a tool's input for the header, instead of raw JSON. */
+function summarizeInput(name: string, input: unknown): string {
+  const o = input as Record<string, unknown>;
+  if (name === "read_file" || name === "list_files") return String(o?.path ?? "");
+  if (name === "edit_file") return String(o?.path ?? "");
+  if (name === "bash") return String(o?.command ?? "");
+  return JSON.stringify(input);
+}
+
+/** Trim tool output for display: first 6 lines, note how many were hidden. */
+function clip(s: string): string {
+  const lines = s.replace(/\s+$/, "").split("\n");
+  if (lines.length <= 6) return lines.join("\n");
+  return lines.slice(0, 6).join("\n") + `\n… +${lines.length - 6} more lines`;
 }
