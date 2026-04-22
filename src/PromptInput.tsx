@@ -1,6 +1,7 @@
-import { useState, useEffect, useRef } from "react";
-import { Text, useInput } from "ink";
+import { useState, useEffect, useRef, type ReactNode } from "react";
+import { Box, Text, useInput } from "ink";
 import chalk from "chalk";
+import { findTrigger, getCompletions, type Completion } from "./completion.js";
 
 type Props = {
   value: string;
@@ -12,6 +13,8 @@ type Props = {
   isActive?: boolean;
   /** Called on backspace-at-empty or Esc; lets the parent drop a mode. */
   onExitMode?: () => void;
+  /** Rendered to the left of the input line (e.g. "❯ " or "! "). */
+  prefix?: ReactNode;
 };
 
 const PASTE_START = "[200~";
@@ -31,13 +34,20 @@ export function PromptInput({
   history = [],
   isActive = true,
   onExitMode,
+  prefix,
 }: Props) {
   const [cursor, setCursor] = useState(value.length);
   const [historyIdx, setHistoryIdx] = useState<number | null>(null);
   const [draft, setDraft] = useState("");
   const [pastes, setPastes] = useState<string[]>([]);
+  const [compSel, setCompSel] = useState(0);
+  const [compDismissed, setCompDismissed] = useState(false);
   const inPaste = useRef(false);
   const pasteBuf = useRef("");
+
+  const trigger = compDismissed ? null : findTrigger(value, cursor);
+  const completions: Completion[] = trigger ? getCompletions(trigger) : [];
+  const showCompletions = completions.length > 0;
 
   useEffect(() => {
     if (cursor > value.length) setCursor(value.length);
@@ -53,6 +63,16 @@ export function PromptInput({
   const setValue = (v: string, c: number) => {
     onChange(v);
     setCursor(Math.max(0, Math.min(c, v.length)));
+    setCompDismissed(false);
+    setCompSel(0);
+  };
+
+  const acceptCompletion = () => {
+    if (!trigger || !completions[compSel]) return;
+    const picked = completions[compSel].value;
+    const tail = picked.endsWith("/") ? "" : " ";
+    const next = value.slice(0, trigger.start) + picked + tail + value.slice(trigger.end);
+    setValue(next, trigger.start + picked.length + tail.length);
   };
 
   const insert = (text: string) => {
@@ -126,12 +146,24 @@ export function PromptInput({
         return finishPaste(input);
       }
 
-      if (key.upArrow) return recall(-1);
-      if (key.downArrow) return recall(1);
+      if (key.upArrow) {
+        if (showCompletions)
+          return setCompSel((s) => (s - 1 + completions.length) % completions.length);
+        return recall(-1);
+      }
+      if (key.downArrow) {
+        if (showCompletions) return setCompSel((s) => (s + 1) % completions.length);
+        return recall(1);
+      }
       if (key.ctrl && input === "c") return;
-      if (key.tab) return;
+
+      if (key.tab) {
+        if (showCompletions) acceptCompletion();
+        return;
+      }
 
       if (key.return) {
+        if (showCompletions) return acceptCompletion();
         setHistoryIdx(null);
         setDraft("");
         setPastes([]);
@@ -157,6 +189,7 @@ export function PromptInput({
       }
 
       if (key.escape) {
+        if (showCompletions) return setCompDismissed(true);
         setHistoryIdx(null);
         setDraft("");
         setPastes([]);
@@ -173,19 +206,70 @@ export function PromptInput({
     { isActive },
   );
 
+  let line: string;
   if (value.length === 0) {
-    const ph = placeholder
+    line = placeholder
       ? chalk.inverse(placeholder[0]) + chalk.dim(placeholder.slice(1))
       : chalk.inverse(" ");
-    return <Text>{ph}</Text>;
+  } else {
+    line = "";
+    let i = 0;
+    for (const ch of value) {
+      line += i === cursor ? chalk.inverse(ch) : ch;
+      i++;
+    }
+    if (cursor === value.length) line += chalk.inverse(" ");
   }
 
-  let out = "";
-  let i = 0;
-  for (const ch of value) {
-    out += i === cursor ? chalk.inverse(ch) : ch;
-    i++;
-  }
-  if (cursor === value.length) out += chalk.inverse(" ");
-  return <Text>{out}</Text>;
+  const cols = process.stdout.columns || 80;
+
+  return (
+    <Box flexDirection="column">
+      {showCompletions && (
+        <>
+          <Dropdown items={completions} selected={compSel} cols={cols} />
+          <Text dimColor>{"─".repeat(cols)}</Text>
+        </>
+      )}
+      <Box>
+        {prefix}
+        <Text>{line}</Text>
+      </Box>
+    </Box>
+  );
+}
+
+const MAX_VISIBLE = 5;
+
+function Dropdown({
+  items,
+  selected,
+  cols,
+}: { items: Completion[]; selected: number; cols: number }) {
+  const start = Math.max(0, Math.min(selected - 2, items.length - MAX_VISIBLE));
+  const visible = items.slice(start, start + MAX_VISIBLE);
+  const nameW = Math.min(
+    Math.max(...visible.map((c) => c.value.length)) + 2,
+    Math.floor(cols * 0.4),
+  );
+  return (
+    <Box flexDirection="column" paddingLeft={2}>
+      {visible.map((c, i) => {
+        const idx = start + i;
+        const sel = idx === selected;
+        const name = c.value.padEnd(nameW).slice(0, nameW);
+        const desc = c.desc
+          ? c.desc.length > cols - nameW - 4
+            ? c.desc.slice(0, cols - nameW - 5) + "…"
+            : c.desc
+          : "";
+        return (
+          <Text key={idx} color={sel ? "cyan" : undefined} dimColor={!sel}>
+            {name}
+            {desc}
+          </Text>
+        );
+      })}
+    </Box>
+  );
 }

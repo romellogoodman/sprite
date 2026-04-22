@@ -264,32 +264,32 @@ export function App({
             <Text> working…</Text>
           </>
         ) : (
-          <>
-            {bashMode ? (
-              <Text color="yellow">! </Text>
-            ) : (
-              <Text color="cyan">❯ </Text>
-            )}
-            <PromptInput
-              value={input}
-              onChange={(v) => {
-                if (!bashMode && input === "" && v.startsWith("!")) {
-                  setBashMode(true);
-                  setInput(v.slice(1).replace(/^\s+/, ""));
-                  return;
-                }
-                setInput(v);
-              }}
-              onSubmit={handleSubmit}
-              onExitMode={() => setBashMode(false)}
-              history={inputHistory}
-              placeholder={
-                bashMode
-                  ? "run a shell command"
-                  : "ask sprite anything (or 'exit')"
+          <PromptInput
+            prefix={
+              bashMode ? (
+                <Text color="yellow">! </Text>
+              ) : (
+                <Text color="cyan">❯ </Text>
+              )
+            }
+            value={input}
+            onChange={(v) => {
+              if (!bashMode && input === "" && v.startsWith("!")) {
+                setBashMode(true);
+                setInput(v.slice(1).replace(/^\s+/, ""));
+                return;
               }
-            />
-          </>
+              setInput(v);
+            }}
+            onSubmit={handleSubmit}
+            onExitMode={() => setBashMode(false)}
+            history={inputHistory}
+            placeholder={
+              bashMode
+                ? "run a shell command"
+                : "ask sprite anything (or 'exit')"
+            }
+          />
         )}
       </Box>
     </Box>
