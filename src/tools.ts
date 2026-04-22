@@ -182,7 +182,7 @@ function editFile(relPath: string, oldStr: string, newStr: string): string {
   return `Edited ${relPath}`;
 }
 
-function bash(command: string): string {
+export function bash(command: string): string {
   const result = spawnSync(command, {
     shell: true,
     encoding: "utf8",

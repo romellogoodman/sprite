@@ -4,7 +4,7 @@ import TextInput from "ink-text-input";
 import Spinner from "ink-spinner";
 import type Anthropic from "@anthropic-ai/sdk";
 import { runTurn, compactHistory, type AgentEvent } from "./agent.js";
-import type { BashApproval, ToolContext } from "./tools.js";
+import { bash, type BashApproval, type ToolContext } from "./tools.js";
 import { PromptInput } from "./PromptInput.js";
 import { startSession, loadLastSession, type Session } from "./session.js";
 import {
@@ -145,6 +145,24 @@ export function App({
         push({ kind: "error", text: msg });
       } finally {
         setBusy(false);
+      }
+      return;
+    }
+
+    if (text.startsWith("!")) {
+      const cmd = text.slice(1).trim();
+      setInput("");
+      setInputHistory((h) => (h[h.length - 1] === text ? h : [...h, text]));
+      if (!cmd) {
+        push({ kind: "error", text: "Usage: ! <command>" });
+        return;
+      }
+      push({ kind: "user", text });
+      try {
+        push({ kind: "result", name: `$ ${cmd}`, output: bash(cmd), isError: false });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        push({ kind: "result", name: `$ ${cmd}`, output: msg, isError: true });
       }
       return;
     }
