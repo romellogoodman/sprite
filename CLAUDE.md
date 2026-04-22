@@ -20,7 +20,7 @@ The model never touches the filesystem directly — it requests, the loop execut
 - `edit_file(path, old_str, new_str)` — string-replace edit; creates the file if it doesn't exist
 - `bash(command)` — run a shell command (120s timeout)
 
-Four tools, no more. Anything else sprite needs, it can do via `bash` or by writing a script into the project.
+Four tools, no more. Anything else sprite needs, it can do via `bash` or by writing a script into the project. All tool output is capped at 50 KB (head + tail) before it reaches the model.
 
 ## Stack
 
@@ -33,11 +33,43 @@ Four tools, no more. Anything else sprite needs, it can do via `bash` or by writ
 ## Layout
 
 - `bin/sprite.mjs` — global-link shim (spawns local `tsx` with project tsconfig)
-- `src/cli.tsx` — entry point, renders `<App />`
-- `src/App.tsx` — Ink UI: login screen, conversation view, input prompt
-- `src/agent.ts` — `runTurn()`: the model ↔ tool loop
-- `src/tools.ts` — tool schemas + `executeTool()`
-- `src/config.ts` — API key persistence at `~/.config/sprite/config.json`
+- `src/cli.tsx` — entry point; routes to `<App />` or `runPrint()` based on flags
+- `src/App.tsx` — Ink UI: login screen, conversation view, slash-command handling
+- `src/PromptInput.tsx` — custom input: cursor, ↑/↓ history, bracketed paste
+- `src/agent.ts` — `runTurn()` model↔tool loop; system prompt; `compactHistory()`; `@path` expansion
+- `src/tools.ts` — tool schemas + `executeTool()` with output capping
+- `src/print.ts` — headless one-shot runner for `-p`
+- `src/session.ts` — JSONL save/load under `~/.config/sprite/sessions/`
+- `src/config.ts` — API key + bash allowlist persistence
+
+## CLI flags
+
+- `-p "<prompt>"` / `--print` — run one turn non-interactively; assistant text → stdout, tool activity → stderr
+- `-c` / `--continue` — resume the most recent session for this directory
+- `--trust` — skip bash confirmations
+
+## Slash commands
+
+- `/clear` — drop history, start a fresh session file
+- `/compact` — summarize the conversation into one message and continue from that
+- `/logout` — clear the saved API key
+
+## System prompt
+
+`buildSystemPrompt()` assembles, in order:
+1. The hard-coded base persona
+2. An environment block (cwd + today's date)
+3. Project instructions from `AGENTS.md` / `AGENT.md` / `CLAUDE.md`, gathered from `~/.config/sprite/` (global) then each directory from the git root down to cwd. Duplicate contents are de-duped; later sections are more specific and take precedence.
+
+This is rebuilt per turn, so editing `CLAUDE.md` mid-session takes effect on the next message (at the cost of a prompt-cache miss when it changes).
+
+## Input handling
+
+`PromptInput` enables bracketed paste (`\x1b[?2004h`), buffers between `[200~ … [201~`, and collapses multi-line pastes to a `[Pasted #n N lines]` token that's expanded on submit. `@path` tokens in the submitted text are replaced with the referenced file's contents inside `runTurn()`.
+
+## Sessions
+
+Every interactive run writes `history` to `~/.config/sprite/sessions/<dirname-hash>/<timestamp>.jsonl` after each turn (full rewrite, not append — keeps the file a consistent snapshot). `-c` loads the newest file for the current directory; `/clear` starts a new one.
 
 ## Auth
 
