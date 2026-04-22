@@ -84,8 +84,13 @@ const SHELL_META = /[;&|`<>\n]|\$\(/;
 
 export function isBashAllowed(command: string): boolean {
   if (SHELL_META.test(command)) return false;
+  const cmd = command.trim();
   const allow = readProjects()[projectKey()]?.allowBash ?? [];
-  return allow.some((p) => p.trim().length > 0 && command.startsWith(p));
+  return allow.some((p) => {
+    const prefix = p.trim();
+    if (!prefix) return false;
+    return cmd === prefix || cmd.startsWith(prefix + " ");
+  });
 }
 
 export function allowBashPrefix(prefix: string): void {
@@ -100,8 +105,26 @@ export function allowBashPrefix(prefix: string): void {
   writeProjects(all);
 }
 
-/** Suggest a reasonable prefix to save for "always allow": first two words. */
+// Commands that execute whatever follows them. Allowlisting any of these as
+// a prefix is equivalent to allowlisting everything, so we only ever suggest
+// the full exact command instead.
+const BARE_WRAPPERS = new Set([
+  "bash", "sh", "zsh", "fish",
+  "sudo", "doas",
+  "env", "nice", "nohup", "time", "timeout",
+  "xargs", "exec", "eval",
+]);
+
+/**
+ * Suggest a prefix to save for "always allow". Uses the second token only
+ * when it looks like a subcommand (git log, npm run, cargo build) — not a
+ * flag, path, or argument — so `rm -rf foo` suggests `rm`, not `rm -rf`.
+ */
 export function suggestBashPrefix(command: string): string {
   const parts = command.trim().split(/\s+/);
-  return parts.slice(0, 2).join(" ");
+  const [cmd, arg] = parts;
+  if (!cmd) return "";
+  if (BARE_WRAPPERS.has(cmd)) return command.trim();
+  if (arg && /^[a-z][\w-]*$/.test(arg)) return `${cmd} ${arg}`;
+  return cmd;
 }
