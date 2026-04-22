@@ -71,6 +71,23 @@ export function buildSystemPrompt(cwd: string = process.cwd()): string {
   return BASE_SYSTEM_PROMPT + buildEnvironment(cwd) + loadProjectContext(cwd);
 }
 
+/**
+ * Expand `@path` tokens in a user prompt to the referenced file's contents.
+ * Only triggers when the path exists as a regular file; anything else (dirs,
+ * missing paths, email-like strings) is left untouched so casual @-mentions
+ * in prose don't explode.
+ */
+export function expandFileMentions(text: string): string {
+  return text.replace(/@([\w./~][\w./~-]*)/g, (match, rel: string) => {
+    try {
+      const body = readFileSync(rel, "utf8");
+      return `${match}\n<file path="${rel}">\n${body}\n</file>`;
+    } catch {
+      return match;
+    }
+  });
+}
+
 export type AgentEvent =
   | { type: "text"; text: string }
   | { type: "tool_use"; id: string; name: string; input: unknown }
@@ -91,6 +108,7 @@ export async function runTurn(
 ): Promise<Anthropic.MessageParam[]> {
   const client = new Anthropic({ apiKey });
   const system = buildSystemPrompt();
+  userMessage = expandFileMentions(userMessage);
   const messages: Anthropic.MessageParam[] = [
     ...history,
     { role: "user", content: userMessage },
