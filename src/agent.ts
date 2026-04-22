@@ -5,11 +5,30 @@ import Anthropic from "@anthropic-ai/sdk";
 import { tools, executeTool, type ToolContext } from "./tools.js";
 import { configDir } from "./config.js";
 
-const DEFAULT_MODEL = "claude-opus-4-7";
+const DEFAULT_MODEL = "claude-haiku-4-5";
 
 // Read lazily so --model (which sets the env var after module import) is seen.
 export function model(): string {
   return process.env.SPRITE_MODEL || DEFAULT_MODEL;
+}
+
+// effort/adaptive-thinking aren't supported on every model; only send them
+// where they won't 400.
+function modelParams(): Partial<Anthropic.MessageCreateParams> {
+  const m = model();
+  if (m.includes("opus-4-7")) {
+    return {
+      thinking: { type: "adaptive" },
+      output_config: { effort: "xhigh" },
+    };
+  }
+  if (m.includes("opus") || m.includes("sonnet-4-6")) {
+    return {
+      thinking: { type: "adaptive" },
+      output_config: { effort: "high" },
+    };
+  }
+  return {};
 }
 
 // Approximate context windows for the % indicator. Unknown models fall back
@@ -177,8 +196,7 @@ export async function runTurn(
     const stream = client.messages.stream({
       model: model(),
       max_tokens: 16000,
-      thinking: { type: "adaptive" },
-      output_config: { effort: "xhigh" },
+      ...modelParams(),
       cache_control: { type: "ephemeral" },
       system,
       tools,
