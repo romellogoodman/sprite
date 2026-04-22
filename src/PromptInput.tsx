@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Text, useInput } from "ink";
 import chalk from "chalk";
 
@@ -12,9 +12,14 @@ type Props = {
   isActive?: boolean;
 };
 
+const PASTE_START = "[200~";
+const PASTE_END = "[201~";
+
 /**
  * Single-line text input for the main prompt. Replaces ink-text-input so we
- * can own cursor placement (needed for history recall) and, later, paste.
+ * can own cursor placement (history recall) and handle bracketed paste:
+ * multi-line pastes collapse to a `[Pasted #n N lines]` token in the visible
+ * line and are expanded back to their full contents on submit.
  */
 export function PromptInput({
   value,
@@ -27,15 +32,42 @@ export function PromptInput({
   const [cursor, setCursor] = useState(value.length);
   const [historyIdx, setHistoryIdx] = useState<number | null>(null);
   const [draft, setDraft] = useState("");
+  const [pastes, setPastes] = useState<string[]>([]);
+  const inPaste = useRef(false);
+  const pasteBuf = useRef("");
 
   useEffect(() => {
     if (cursor > value.length) setCursor(value.length);
   }, [value, cursor]);
 
+  useEffect(() => {
+    process.stdout.write("\x1b[?2004h");
+    return () => {
+      process.stdout.write("\x1b[?2004l");
+    };
+  }, []);
+
   const setValue = (v: string, c: number) => {
     onChange(v);
     setCursor(Math.max(0, Math.min(c, v.length)));
   };
+
+  const insert = (text: string) => {
+    setHistoryIdx(null);
+    setValue(value.slice(0, cursor) + text + value.slice(cursor), cursor + text.length);
+  };
+
+  const finishPaste = (raw: string) => {
+    const text = raw.replace(/\r\n?/g, "\n");
+    if (!text.includes("\n") && text.length < 200) return insert(text);
+    const n = pastes.length + 1;
+    const lines = text.split("\n").length;
+    setPastes((p) => [...p, text]);
+    insert(`[Pasted #${n} ${lines} line${lines === 1 ? "" : "s"}]`);
+  };
+
+  const expandPastes = (v: string): string =>
+    v.replace(/\[Pasted #(\d+) \d+ lines?\]/g, (m, n) => pastes[Number(n) - 1] ?? m);
 
   const recall = (dir: 1 | -1) => {
     if (history.length === 0) return;
@@ -60,6 +92,37 @@ export function PromptInput({
 
   useInput(
     (input, key) => {
+      // Mid-paste: buffer until the end marker shows up. Search the
+      // accumulated buffer in case the marker straddles two stdin chunks.
+      if (inPaste.current) {
+        pasteBuf.current += input;
+        const end = pasteBuf.current.indexOf(PASTE_END);
+        if (end === -1) return;
+        const body = pasteBuf.current.slice(0, end).replace(/\x1b$/, "");
+        pasteBuf.current = "";
+        inPaste.current = false;
+        return finishPaste(body);
+      }
+
+      // Bracketed paste start. Ink strips the leading ESC, so the marker
+      // arrives as "[200~". The end marker may be in this same chunk.
+      if (input.startsWith(PASTE_START)) {
+        const rest = input.slice(PASTE_START.length);
+        const end = rest.indexOf(PASTE_END);
+        if (end !== -1) {
+          return finishPaste(rest.slice(0, end).replace(/\x1b$/, ""));
+        }
+        inPaste.current = true;
+        pasteBuf.current = rest;
+        return;
+      }
+
+      // Fallback for terminals without bracketed paste: a multi-char chunk
+      // containing a newline can only be a paste.
+      if (!key.return && input.length > 1 && /[\r\n]/.test(input)) {
+        return finishPaste(input);
+      }
+
       if (key.upArrow) return recall(-1);
       if (key.downArrow) return recall(1);
       if (key.ctrl && input === "c") return;
@@ -68,7 +131,8 @@ export function PromptInput({
       if (key.return) {
         setHistoryIdx(null);
         setDraft("");
-        onSubmit(value);
+        setPastes([]);
+        onSubmit(expandPastes(value));
         return;
       }
 
@@ -92,10 +156,7 @@ export function PromptInput({
 
       // eslint-disable-next-line no-control-regex
       const clean = input.replace(/[\x00-\x1f\x7f]/g, "");
-      if (clean) {
-        setHistoryIdx(null);
-        setValue(value.slice(0, cursor) + clean + value.slice(cursor), cursor + clean.length);
-      }
+      if (clean) insert(clean);
     },
     { isActive },
   );
