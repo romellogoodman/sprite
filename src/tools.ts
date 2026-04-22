@@ -214,7 +214,15 @@ function editFile(relPath: string, oldStr: string, newStr: string): string {
   }
 
   fs.writeFileSync(relPath, content.replace(oldStr, () => newStr), "utf8");
-  return `Edited ${relPath}`;
+  return `Edited ${relPath}\n${renderDiff(content, oldStr, newStr)}`;
+}
+
+function renderDiff(content: string, oldStr: string, newStr: string): string {
+  const idx = content.indexOf(oldStr);
+  const startLine = content.slice(0, idx).split("\n").length;
+  const minus = oldStr.split("\n").map((l) => `- ${l}`);
+  const plus = newStr.split("\n").map((l) => `+ ${l}`);
+  return [`@@ line ${startLine} @@`, ...minus, ...plus].join("\n");
 }
 
 export function bash(command: string): string {

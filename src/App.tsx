@@ -387,8 +387,8 @@ function Line({ line, verbose }: { line: DisplayLine; verbose: boolean }) {
             {line.input ? <Text dimColor> {line.input}</Text> : null}
           </Text>
           {done && (
-            <Box marginLeft={2}>
-              <Text dimColor>{verbose ? line.output : clip(line.output!)}</Text>
+            <Box marginLeft={2} flexDirection="column">
+              <ToolOutput text={verbose ? line.output! : clip(line.output!)} />
             </Box>
           )}
         </Box>
@@ -401,6 +401,22 @@ function Line({ line, verbose }: { line: DisplayLine; verbose: boolean }) {
         </Box>
       );
   }
+}
+
+function ToolOutput({ text }: { text: string }) {
+  return (
+    <>
+      {text.split("\n").map((l, i) => {
+        const color =
+          l.startsWith("+ ") ? "green" : l.startsWith("- ") ? "red" : undefined;
+        return (
+          <Text key={i} color={color} dimColor={!color}>
+            {l || " "}
+          </Text>
+        );
+      })}
+    </>
+  );
 }
 
 function BashConfirm({ command }: { command: string }) {
