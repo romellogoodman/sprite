@@ -218,11 +218,30 @@ function editFile(relPath: string, oldStr: string, newStr: string): string {
 }
 
 function renderDiff(content: string, oldStr: string, newStr: string): string {
+  const CTX = 2;
+  const fileLines = content.split("\n");
   const idx = content.indexOf(oldStr);
-  const startLine = content.slice(0, idx).split("\n").length;
-  const minus = oldStr.split("\n").map((l) => `- ${l}`);
-  const plus = newStr.split("\n").map((l) => `+ ${l}`);
-  return [`@@ line ${startLine} @@`, ...minus, ...plus].join("\n");
+  const start = content.slice(0, idx).split("\n").length; // 1-based
+  const oldLines = oldStr.split("\n");
+  const newLines = newStr.split("\n");
+
+  const ctxLo = Math.max(1, start - CTX);
+  const ctxBefore = fileLines.slice(ctxLo - 1, start - 1);
+  const afterIdx = start - 1 + oldLines.length;
+  const ctxAfter = fileLines.slice(afterIdx, afterIdx + CTX);
+
+  const maxLn = start + Math.max(oldLines.length, newLines.length) + CTX;
+  const w = String(maxLn).length;
+  const num = (n: number | "") => String(n).padStart(w);
+
+  const out: string[] = [];
+  let ln = ctxLo;
+  for (const l of ctxBefore) out.push(`  ${num(ln++)} │ ${l}`);
+  for (const l of oldLines) out.push(`- ${num(ln++)} │ ${l}`);
+  let nln = start;
+  for (const l of newLines) out.push(`+ ${num(nln++)} │ ${l}`);
+  for (const l of ctxAfter) out.push(`  ${num(nln++)} │ ${l}`);
+  return out.join("\n");
 }
 
 export function bash(command: string): string {

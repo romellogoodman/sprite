@@ -429,10 +429,22 @@ function ToolOutput({ text }: { text: string }) {
   return (
     <>
       {text.split("\n").map((l, i) => {
-        const color =
-          l.startsWith("+ ") ? "green" : l.startsWith("- ") ? "red" : undefined;
+        if (l.startsWith("+ ")) {
+          return (
+            <Text key={i} backgroundColor="#1c3b1c" color="greenBright">
+              {l}
+            </Text>
+          );
+        }
+        if (l.startsWith("- ")) {
+          return (
+            <Text key={i} backgroundColor="#4a1e1e" color="redBright">
+              {l}
+            </Text>
+          );
+        }
         return (
-          <Text key={i} color={color} dimColor={!color}>
+          <Text key={i} dimColor>
             {l || " "}
           </Text>
         );
