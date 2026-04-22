@@ -133,7 +133,8 @@ export type AgentEvent =
   | { type: "text"; text: string }
   | { type: "tool_use"; id: string; name: string; input: unknown }
   | { type: "tool_result"; id: string; name: string; output: string; isError: boolean }
-  | { type: "usage"; input: number; output: number };
+  | { type: "usage"; input: number; output: number }
+  | { type: "compacted"; before: number; pct: number };
 
 /**
  * Summarize the conversation so far and return a fresh history containing
@@ -186,8 +187,9 @@ export async function runTurn(
 ): Promise<Anthropic.MessageParam[]> {
   const client = new Anthropic({ apiKey });
   const system = buildSystemPrompt();
+  const window = contextWindow();
   userMessage = expandFileMentions(userMessage);
-  const messages: Anthropic.MessageParam[] = [
+  let messages: Anthropic.MessageParam[] = [
     ...history,
     { role: "user", content: userMessage },
   ];
@@ -207,12 +209,13 @@ export async function runTurn(
 
     const response = await stream.finalMessage();
 
+    const inputTokens =
+      (response.usage.input_tokens ?? 0) +
+      (response.usage.cache_read_input_tokens ?? 0) +
+      (response.usage.cache_creation_input_tokens ?? 0);
     onEvent({
       type: "usage",
-      input:
-        (response.usage.input_tokens ?? 0) +
-        (response.usage.cache_read_input_tokens ?? 0) +
-        (response.usage.cache_creation_input_tokens ?? 0),
+      input: inputTokens,
       output: response.usage.output_tokens ?? 0,
     });
 
@@ -274,5 +277,15 @@ export async function runTurn(
     }
 
     messages.push({ role: "user", content: toolResults });
+
+    // Safety net: if the conversation is nearing the context limit, compact
+    // before the next model call. /compact is still the preferred path so
+    // the user can pick the moment; this just stops us hitting the wall.
+    if (inputTokens > window * 0.85) {
+      const before = messages.length;
+      const pct = Math.round((100 * inputTokens) / window);
+      messages = await compactHistory(apiKey, messages);
+      onEvent({ type: "compacted", before, pct });
+    }
   }
 }

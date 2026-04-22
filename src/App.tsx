@@ -3,7 +3,13 @@ import { Box, Text, useApp, useInput } from "ink";
 import TextInput from "ink-text-input";
 import Spinner from "ink-spinner";
 import type Anthropic from "@anthropic-ai/sdk";
-import { runTurn, compactHistory, type AgentEvent } from "./agent.js";
+import {
+  runTurn,
+  compactHistory,
+  model,
+  contextWindow,
+  type AgentEvent,
+} from "./agent.js";
 import { bash, type BashApproval, type ToolContext } from "./tools.js";
 import { PromptInput } from "./PromptInput.js";
 import { startSession, loadLastSession, type Session } from "./session.js";
@@ -50,6 +56,7 @@ export function App({
   const [phrase, setPhrase] = useState("working");
   const [elapsed, setElapsed] = useState(0);
   const [tokens, setTokens] = useState({ in: 0, out: 0 });
+  const [contextUsed, setContextUsed] = useState(0);
   const [lines, setLines] = useState<DisplayLine[]>(() => {
     if (!resume) return [];
     const prev = loadLastSession();
@@ -149,6 +156,13 @@ export function App({
       });
     } else if (e.type === "usage") {
       setTokens((t) => ({ in: t.in + e.input, out: t.out + e.output }));
+      setContextUsed(e.input);
+    } else if (e.type === "compacted") {
+      push({
+        kind: "assistant",
+        text: `(auto-compacted at ${e.pct}% — ${e.before} messages → summary)`,
+      });
+      setContextUsed(0);
     } else if (e.type === "tool_result") {
       setLines((prev) =>
         prev.map((l) =>
@@ -173,6 +187,7 @@ export function App({
       setInput("");
       setLines([]);
       setHistory([]);
+      setContextUsed(0);
       setSession(startSession());
       return;
     }
@@ -190,6 +205,7 @@ export function App({
         const before = history.length;
         const compacted = await compactHistory(apiKey, history);
         setHistory(compacted);
+        setContextUsed(0);
         session.save(compacted);
         push({
           kind: "assistant",
@@ -271,7 +287,7 @@ export function App({
 
   return (
     <Box flexDirection="column">
-      <Header />
+      <Header contextUsed={contextUsed} />
 
       <Box flexDirection="column" marginBottom={1}>
         {lines.map((line, i) => (
@@ -330,11 +346,12 @@ export function App({
   );
 }
 
-function Header() {
+function Header({ contextUsed }: { contextUsed: number }) {
   const cwd = process.cwd();
   const home = process.env.HOME ?? "";
   const pretty =
     home && cwd.startsWith(home) ? "~" + cwd.slice(home.length) : cwd;
+  const pct = Math.round((100 * contextUsed) / contextWindow());
   return (
     <Box
       flexDirection="column"
@@ -350,7 +367,12 @@ function Header() {
         </Text>
         <Text dimColor> · a small helping hand inside your computer</Text>
       </Text>
-      <Text dimColor>cwd: {pretty}</Text>
+      <Text dimColor>
+        cwd: {pretty} · {model()}
+        {contextUsed > 0 && (
+          <Text color={pct >= 75 ? "yellow" : undefined}> · {pct}% context</Text>
+        )}
+      </Text>
       <Box marginTop={1}>
         <Text dimColor>
           <Text color="cyan">!</Text> shell <Text color="cyan">@</Text> file{" "}
