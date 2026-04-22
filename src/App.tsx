@@ -48,6 +48,7 @@ export function App({
     resume ? loadLastSession() : [],
   );
   const [inputHistory, setInputHistory] = useState<string[]>([]);
+  const [bashMode, setBashMode] = useState(false);
   const [pendingBash, setPendingBash] = useState<PendingBash | null>(null);
   const [session, setSession] = useState<Session>(() => startSession());
 
@@ -149,15 +150,13 @@ export function App({
       return;
     }
 
-    if (text.startsWith("!")) {
-      const cmd = text.slice(1).trim();
+    if (bashMode || text.startsWith("!")) {
+      const cmd = bashMode ? text : text.slice(1).trim();
       setInput("");
-      setInputHistory((h) => (h[h.length - 1] === text ? h : [...h, text]));
-      if (!cmd) {
-        push({ kind: "error", text: "Usage: ! <command>" });
-        return;
-      }
-      push({ kind: "user", text });
+      setBashMode(false);
+      if (!cmd) return;
+      setInputHistory((h) => (h[h.length - 1] === `!${cmd}` ? h : [...h, `!${cmd}`]));
+      push({ kind: "user", text: `! ${cmd}` });
       try {
         push({ kind: "result", name: `$ ${cmd}`, output: bash(cmd), isError: false });
       } catch (err) {
@@ -217,13 +216,27 @@ export function App({
           </>
         ) : (
           <>
-            <Text color="cyan">❯ </Text>
+            {bashMode ? (
+              <Text color="yellow">! </Text>
+            ) : (
+              <Text color="cyan">❯ </Text>
+            )}
             <PromptInput
               value={input}
-              onChange={setInput}
+              onChange={(v) => {
+                if (!bashMode && input === "" && v.startsWith("!")) {
+                  setBashMode(true);
+                  setInput(v.slice(1).replace(/^\s+/, ""));
+                  return;
+                }
+                setInput(v);
+              }}
               onSubmit={handleSubmit}
+              onExitMode={() => setBashMode(false)}
               history={inputHistory}
-              placeholder="ask sprite anything (or 'exit')"
+              placeholder={
+                bashMode ? "run a shell command" : "ask sprite anything (or 'exit')"
+              }
             />
           </>
         )}

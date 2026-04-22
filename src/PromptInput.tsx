@@ -10,6 +10,8 @@ type Props = {
   /** Previously submitted prompts, oldest first. ↑/↓ cycles through these. */
   history?: string[];
   isActive?: boolean;
+  /** Called on backspace-at-empty or Esc; lets the parent drop a mode. */
+  onExitMode?: () => void;
 };
 
 const PASTE_START = "[200~";
@@ -28,6 +30,7 @@ export function PromptInput({
   placeholder = "",
   history = [],
   isActive = true,
+  onExitMode,
 }: Props) {
   const [cursor, setCursor] = useState(value.length);
   const [historyIdx, setHistoryIdx] = useState<number | null>(null);
@@ -147,6 +150,7 @@ export function PromptInput({
       }
 
       if (key.backspace || key.delete) {
+        if (value.length === 0) return onExitMode?.();
         if (cursor === 0) return;
         setHistoryIdx(null);
         return setValue(value.slice(0, cursor - 1) + value.slice(cursor), cursor - 1);
@@ -156,7 +160,8 @@ export function PromptInput({
         setHistoryIdx(null);
         setDraft("");
         setPastes([]);
-        return setValue("", 0);
+        setValue("", 0);
+        return onExitMode?.();
       }
 
       if (key.meta) return;
