@@ -152,7 +152,14 @@ export function PromptInput({
         return setValue(value.slice(0, cursor - 1) + value.slice(cursor), cursor - 1);
       }
 
-      if (key.meta || key.escape) return;
+      if (key.escape) {
+        setHistoryIdx(null);
+        setDraft("");
+        setPastes([]);
+        return setValue("", 0);
+      }
+
+      if (key.meta) return;
 
       // eslint-disable-next-line no-control-regex
       const clean = input.replace(/[\x00-\x1f\x7f]/g, "");

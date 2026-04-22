@@ -27,6 +27,7 @@ First launch will ask for an Anthropic API key. It's saved to `~/.config/sprite/
 ## In the prompt
 
 - `↑ / ↓` — recall previous prompts
+- `Esc` — clear the input
 - `Ctrl+A / E / U` — start of line, end of line, clear line
 - `@path/to/file` — the file's contents are inlined when you submit
 - Multi-line pastes collapse to `[Pasted #1 N lines]` and expand on submit
