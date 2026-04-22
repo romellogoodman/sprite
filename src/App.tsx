@@ -7,6 +7,7 @@ import { runTurn, compactHistory, type AgentEvent } from "./agent.js";
 import { bash, type BashApproval, type ToolContext } from "./tools.js";
 import { PromptInput } from "./PromptInput.js";
 import { startSession, loadLastSession, type Session } from "./session.js";
+import { poem } from "./poem.js";
 import {
   loadApiKey,
   saveApiKey,
@@ -46,6 +47,7 @@ export function App({
   const [apiKey, setApiKey] = useState<string | undefined>(() => loadApiKey());
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
+  const [phrase, setPhrase] = useState("working");
   const [lines, setLines] = useState<DisplayLine[]>(() => {
     if (!resume) return [];
     const prev = loadLastSession();
@@ -159,6 +161,7 @@ export function App({
         push({ kind: "error", text: "Nothing to compact yet." });
         return;
       }
+      setPhrase(poem());
       setBusy(true);
       push({ kind: "user", text: "/compact" });
       try {
@@ -222,6 +225,7 @@ export function App({
 
     setInput("");
     setInputHistory((h) => (h[h.length - 1] === text ? h : [...h, text]));
+    setPhrase(poem());
     setBusy(true);
     push({ kind: "user", text });
 
@@ -261,7 +265,7 @@ export function App({
             <Text color="cyan">
               <Spinner type="dots" />
             </Text>
-            <Text> working…</Text>
+            <Text dimColor> {phrase}…</Text>
           </>
         ) : (
           <PromptInput
