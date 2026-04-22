@@ -177,7 +177,7 @@ export function App({
 
   return (
     <Box flexDirection="column">
-      <Box marginBottom={1}>
+      <Box marginTop={1} marginBottom={1}>
         <Text>A small helping hand inside your computer.</Text>
       </Box>
 
@@ -233,7 +233,7 @@ function Line({ line }: { line: DisplayLine }) {
       return (
         <Box marginLeft={2}>
           <Text color="yellow">⚙ {line.name}</Text>
-          <Text color="gray"> {line.input}</Text>
+          <Text dimColor> {line.input}</Text>
         </Box>
       );
     case "result":
@@ -243,7 +243,7 @@ function Line({ line }: { line: DisplayLine }) {
             {line.isError ? "✗" : "✓"} {line.name}
           </Text>
           <Box marginLeft={2}>
-            <Text color="gray" dimColor>
+            <Text dimColor>
               {line.output}
             </Text>
           </Box>
@@ -271,7 +271,7 @@ function BashConfirm({ command }: { command: string }) {
         </Text>
         <Text>
           <Text color="cyan">[a]</Text> always allow{" "}
-          <Text color="gray">"{prefix} …" in this project</Text>
+          <Text dimColor>"{prefix} …" in this project</Text>
         </Text>
         <Text>
           <Text color="cyan">[n]</Text> deny
@@ -298,11 +298,11 @@ function Login({ onLogin }: { onLogin: (key: string) => void }) {
 
   return (
     <Box flexDirection="column">
-      <Box marginBottom={1}>
+      <Box marginTop={1} marginBottom={1}>
         <Text>A small helping hand inside your computer.</Text>
       </Box>
       <Text>No API key found. Paste your Anthropic API key:</Text>
-      <Text color="gray" dimColor>
+      <Text dimColor>
         (saved to {configPath()}; env ANTHROPIC_API_KEY overrides)
       </Text>
       <Box marginTop={1}>

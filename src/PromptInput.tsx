@@ -170,7 +170,7 @@ export function PromptInput({
 
   if (value.length === 0) {
     const ph = placeholder
-      ? chalk.inverse(placeholder[0]) + chalk.grey(placeholder.slice(1))
+      ? chalk.inverse(placeholder[0]) + chalk.dim(placeholder.slice(1))
       : chalk.inverse(" ");
     return <Text>{ph}</Text>;
   }
