@@ -133,7 +133,13 @@ export function App({
 
   const handleEvent = (e: AgentEvent) => {
     if (e.type === "text") {
-      push({ kind: "assistant", text: e.text });
+      setLines((prev) => {
+        const last = prev[prev.length - 1];
+        if (last?.kind === "assistant") {
+          return [...prev.slice(0, -1), { ...last, text: last.text + e.text }];
+        }
+        return [...prev, { kind: "assistant", text: e.text }];
+      });
     } else if (e.type === "tool_use") {
       push({
         kind: "tool",

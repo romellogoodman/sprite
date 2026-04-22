@@ -185,6 +185,8 @@ export async function runTurn(
       messages,
     });
 
+    stream.on("text", (delta) => onEvent({ type: "text", text: delta }));
+
     const response = await stream.finalMessage();
 
     onEvent({
@@ -198,9 +200,7 @@ export async function runTurn(
 
     const toolUses: Anthropic.ToolUseBlock[] = [];
     for (const block of response.content) {
-      if (block.type === "text") {
-        onEvent({ type: "text", text: block.text });
-      } else if (block.type === "tool_use") {
+      if (block.type === "tool_use") {
         toolUses.push(block);
         onEvent({
           type: "tool_use",
