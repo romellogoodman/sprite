@@ -20,7 +20,14 @@ import {
 type DisplayLine =
   | { kind: "user"; text: string }
   | { kind: "assistant"; text: string }
-  | { kind: "tool"; id: string; name: string; input: string; output?: string; isError?: boolean }
+  | {
+      kind: "tool";
+      id: string;
+      name: string;
+      input: string;
+      output?: string;
+      isError?: boolean;
+    }
   | { kind: "error"; text: string };
 
 type PendingBash = {
@@ -31,7 +38,10 @@ type PendingBash = {
 export function App({
   trust = false,
   resume = false,
-}: { trust?: boolean; resume?: boolean }) {
+}: {
+  trust?: boolean;
+  resume?: boolean;
+}) {
   const { exit } = useApp();
   const [apiKey, setApiKey] = useState<string | undefined>(() => loadApiKey());
   const [input, setInput] = useState("");
@@ -40,19 +50,29 @@ export function App({
     if (!resume) return [];
     const prev = loadLastSession();
     return prev.length > 0
-      ? [{ kind: "assistant", text: `(resumed — ${prev.length} prior messages in context)` }]
-      : [{ kind: "error", text: "No prior session to continue in this directory." }];
+      ? [
+          {
+            kind: "assistant",
+            text: `(resumed — ${prev.length} prior messages in context)`,
+          },
+        ]
+      : [
+          {
+            kind: "error",
+            text: "No prior session to continue in this directory.",
+          },
+        ];
   });
   const [history, setHistory] = useState<Anthropic.MessageParam[]>(() =>
     resume ? loadLastSession() : [],
   );
   const [inputHistory, setInputHistory] = useState<string[]>([]);
   const [bashMode, setBashMode] = useState(false);
+  const [verbose, setVerbose] = useState(false);
   const [pendingBash, setPendingBash] = useState<PendingBash | null>(null);
   const [session, setSession] = useState<Session>(() => startSession());
 
-  const push = (line: DisplayLine) =>
-    setLines((prev) => [...prev, line]);
+  const push = (line: DisplayLine) => setLines((prev) => [...prev, line]);
 
   const toolCtx = useRef<ToolContext>({
     trust,
@@ -64,6 +84,10 @@ export function App({
         setPendingBash({ command, resolve });
       }),
   }).current;
+
+  useInput((input, key) => {
+    if (key.ctrl && input === "o") setVerbose((v) => !v);
+  });
 
   useInput(
     (ch) => {
@@ -95,12 +119,17 @@ export function App({
     if (e.type === "text") {
       push({ kind: "assistant", text: e.text });
     } else if (e.type === "tool_use") {
-      push({ kind: "tool", id: e.id, name: e.name, input: summarizeInput(e.name, e.input) });
+      push({
+        kind: "tool",
+        id: e.id,
+        name: e.name,
+        input: summarizeInput(e.name, e.input),
+      });
     } else if (e.type === "tool_result") {
       setLines((prev) =>
         prev.map((l) =>
           l.kind === "tool" && l.id === e.id
-            ? { ...l, output: truncate(e.output, 500), isError: e.isError }
+            ? { ...l, output: e.output, isError: e.isError }
             : l,
         ),
       );
@@ -155,13 +184,29 @@ export function App({
       setInput("");
       setBashMode(false);
       if (!cmd) return;
-      setInputHistory((h) => (h[h.length - 1] === `!${cmd}` ? h : [...h, `!${cmd}`]));
+      setInputHistory((h) =>
+        h[h.length - 1] === `!${cmd}` ? h : [...h, `!${cmd}`],
+      );
       push({ kind: "user", text: `! ${cmd}` });
       try {
-        push({ kind: "tool", id: "", name: "$", input: cmd, output: bash(cmd), isError: false });
+        push({
+          kind: "tool",
+          id: "",
+          name: "$",
+          input: cmd,
+          output: bash(cmd),
+          isError: false,
+        });
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        push({ kind: "tool", id: "", name: "$", input: cmd, output: msg, isError: true });
+        push({
+          kind: "tool",
+          id: "",
+          name: "$",
+          input: cmd,
+          output: msg,
+          isError: true,
+        });
       }
       return;
     }
@@ -181,7 +226,13 @@ export function App({
     push({ kind: "user", text });
 
     try {
-      const newHistory = await runTurn(apiKey, history, text, toolCtx, handleEvent);
+      const newHistory = await runTurn(
+        apiKey,
+        history,
+        text,
+        toolCtx,
+        handleEvent,
+      );
       setHistory(newHistory);
       session.save(newHistory);
     } catch (err) {
@@ -198,7 +249,7 @@ export function App({
 
       <Box flexDirection="column" marginBottom={1}>
         {lines.map((line, i) => (
-          <Line key={i} line={line} />
+          <Line key={i} line={line} verbose={verbose} />
         ))}
       </Box>
 
@@ -233,7 +284,9 @@ export function App({
               onExitMode={() => setBashMode(false)}
               history={inputHistory}
               placeholder={
-                bashMode ? "run a shell command" : "ask sprite anything (or 'exit')"
+                bashMode
+                  ? "run a shell command"
+                  : "ask sprite anything (or 'exit')"
               }
             />
           </>
@@ -246,7 +299,8 @@ export function App({
 function Header() {
   const cwd = process.cwd();
   const home = process.env.HOME ?? "";
-  const pretty = home && cwd.startsWith(home) ? "~" + cwd.slice(home.length) : cwd;
+  const pretty =
+    home && cwd.startsWith(home) ? "~" + cwd.slice(home.length) : cwd;
   return (
     <Box
       flexDirection="column"
@@ -257,20 +311,24 @@ function Header() {
       marginBottom={1}
     >
       <Text>
-        <Text color="cyan" bold>sprite</Text>
+        <Text color="cyan" bold>
+          sprite
+        </Text>
         <Text dimColor> · a small helping hand inside your computer</Text>
       </Text>
       <Text dimColor>cwd: {pretty}</Text>
       <Box marginTop={1}>
         <Text dimColor>
-          <Text color="cyan">!</Text> shell  <Text color="cyan">@</Text> file  <Text color="cyan">/</Text> commands  <Text color="cyan">↑↓</Text> history
+          <Text color="cyan">!</Text> shell <Text color="cyan">@</Text> file{" "}
+          <Text color="cyan">/</Text> commands <Text color="cyan">↑↓</Text>{" "}
+          history
         </Text>
       </Box>
     </Box>
   );
 }
 
-function Line({ line }: { line: DisplayLine }) {
+function Line({ line, verbose }: { line: DisplayLine; verbose: boolean }) {
   switch (line.kind) {
     case "user":
       return (
@@ -296,7 +354,7 @@ function Line({ line }: { line: DisplayLine }) {
           </Text>
           {done && (
             <Box marginLeft={2}>
-              <Text dimColor>{clip(line.output!)}</Text>
+              <Text dimColor>{verbose ? line.output : clip(line.output!)}</Text>
             </Box>
           )}
         </Box>
@@ -314,7 +372,12 @@ function Line({ line }: { line: DisplayLine }) {
 function BashConfirm({ command }: { command: string }) {
   const prefix = suggestBashPrefix(command);
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor="yellow" paddingX={1}>
+    <Box
+      flexDirection="column"
+      borderStyle="round"
+      borderColor="yellow"
+      paddingX={1}
+    >
       <Text>
         sprite wants to run: <Text color="yellow">{command}</Text>
       </Text>
@@ -360,7 +423,9 @@ function Login({ onLogin }: { onLogin: (key: string) => void }) {
         marginBottom={1}
       >
         <Text>
-          <Text color="cyan" bold>sprite</Text>
+          <Text color="cyan" bold>
+            sprite
+          </Text>
           <Text dimColor> · a small helping hand inside your computer</Text>
         </Text>
       </Box>
@@ -370,7 +435,12 @@ function Login({ onLogin }: { onLogin: (key: string) => void }) {
       </Text>
       <Box marginTop={1}>
         <Text color="cyan">key ❯ </Text>
-        <TextInput value={value} onChange={setValue} onSubmit={submit} mask="•" />
+        <TextInput
+          value={value}
+          onChange={setValue}
+          onSubmit={submit}
+          mask="•"
+        />
       </Box>
       {error && (
         <Box marginTop={1}>
@@ -381,15 +451,11 @@ function Login({ onLogin }: { onLogin: (key: string) => void }) {
   );
 }
 
-function truncate(s: string, max: number): string {
-  if (s.length <= max) return s;
-  return s.slice(0, max) + `… (${s.length - max} more chars)`;
-}
-
 /** One-line summary of a tool's input for the header, instead of raw JSON. */
 function summarizeInput(name: string, input: unknown): string {
   const o = input as Record<string, unknown>;
-  if (name === "read_file" || name === "list_files") return String(o?.path ?? "");
+  if (name === "read_file" || name === "list_files")
+    return String(o?.path ?? "");
   if (name === "edit_file") return String(o?.path ?? "");
   if (name === "bash") return String(o?.command ?? "");
   return JSON.stringify(input);
@@ -399,5 +465,8 @@ function summarizeInput(name: string, input: unknown): string {
 function clip(s: string): string {
   const lines = s.replace(/\s+$/, "").split("\n");
   if (lines.length <= 6) return lines.join("\n");
-  return lines.slice(0, 6).join("\n") + `\n… +${lines.length - 6} more lines`;
+  return (
+    lines.slice(0, 6).join("\n") +
+    `\n… +${lines.length - 6} more lines (ctrl + o)`
+  );
 }
