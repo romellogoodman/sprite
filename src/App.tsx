@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Box, Text, useApp, useInput } from "ink";
 import TextInput from "ink-text-input";
 import Spinner from "ink-spinner";
@@ -48,6 +48,8 @@ export function App({
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [phrase, setPhrase] = useState("working");
+  const [elapsed, setElapsed] = useState(0);
+  const [tokens, setTokens] = useState({ in: 0, out: 0 });
   const [lines, setLines] = useState<DisplayLine[]>(() => {
     if (!resume) return [];
     const prev = loadLastSession();
@@ -91,6 +93,18 @@ export function App({
     if (key.ctrl && input === "o") setVerbose((v) => !v);
   });
 
+  useEffect(() => {
+    if (!busy) return;
+    setElapsed(0);
+    setTokens({ in: 0, out: 0 });
+    const start = Date.now();
+    const t = setInterval(
+      () => setElapsed(Math.floor((Date.now() - start) / 1000)),
+      1000,
+    );
+    return () => clearInterval(t);
+  }, [busy]);
+
   useInput(
     (ch) => {
       if (!pendingBash) return;
@@ -127,6 +141,8 @@ export function App({
         name: e.name,
         input: summarizeInput(e.name, e.input),
       });
+    } else if (e.type === "usage") {
+      setTokens((t) => ({ in: t.in + e.input, out: t.out + e.output }));
     } else if (e.type === "tool_result") {
       setLines((prev) =>
         prev.map((l) =>
@@ -266,6 +282,14 @@ export function App({
               <Spinner type="dots" />
             </Text>
             <Text dimColor> {phrase}…</Text>
+            {elapsed >= 5 && (
+              <Text dimColor>
+                {" "}
+                {elapsed}s
+                {tokens.in + tokens.out > 0 &&
+                  ` · ${fmtTokens(tokens.in + tokens.out)} tokens`}
+              </Text>
+            )}
           </>
         ) : (
           <PromptInput
@@ -463,6 +487,11 @@ function summarizeInput(name: string, input: unknown): string {
   if (name === "edit_file") return String(o?.path ?? "");
   if (name === "bash") return String(o?.command ?? "");
   return JSON.stringify(input);
+}
+
+function fmtTokens(n: number): string {
+  if (n < 1000) return String(n);
+  return (n / 1000).toFixed(1).replace(/\.0$/, "") + "k";
 }
 
 /** Trim tool output for display: first 6 lines, note how many were hidden. */

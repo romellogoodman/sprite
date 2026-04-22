@@ -91,7 +91,8 @@ export function expandFileMentions(text: string): string {
 export type AgentEvent =
   | { type: "text"; text: string }
   | { type: "tool_use"; id: string; name: string; input: unknown }
-  | { type: "tool_result"; id: string; name: string; output: string; isError: boolean };
+  | { type: "tool_result"; id: string; name: string; output: string; isError: boolean }
+  | { type: "usage"; input: number; output: number };
 
 /**
  * Summarize the conversation so far and return a fresh history containing
@@ -163,6 +164,15 @@ export async function runTurn(
     });
 
     const response = await stream.finalMessage();
+
+    onEvent({
+      type: "usage",
+      input:
+        (response.usage.input_tokens ?? 0) +
+        (response.usage.cache_read_input_tokens ?? 0) +
+        (response.usage.cache_creation_input_tokens ?? 0),
+      output: response.usage.output_tokens ?? 0,
+    });
 
     const toolUses: Anthropic.ToolUseBlock[] = [];
     for (const block of response.content) {
