@@ -287,12 +287,11 @@ function Line({ line }: { line: DisplayLine }) {
       );
     case "tool": {
       const done = line.output !== undefined;
-      const mark = !done ? "●" : line.isError ? "✗" : "●";
       const color = !done ? "yellow" : line.isError ? "red" : "green";
       return (
         <Box marginLeft={2} marginTop={1} flexDirection="column">
           <Text>
-            <Text color={color}>{mark}</Text> <Text bold>{line.name}</Text>
+            <Text color={color}>●</Text> <Text bold>{line.name}</Text>
             {line.input ? <Text dimColor> {line.input}</Text> : null}
           </Text>
           {done && (
