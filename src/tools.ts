@@ -230,11 +230,11 @@ export function bash(command: string): string {
   }
 
   const out = [result.stdout, result.stderr].filter(Boolean).join("");
-  const exit = result.status ?? (result.signal ? `signal ${result.signal}` : 0);
-
-  if (result.status !== 0) {
-    throw new Error(`exit ${exit}\n${out || "(no output)"}`);
+  if (result.signal) {
+    throw new Error(`killed by ${result.signal}\n${out || "(no output)"}`);
   }
-
+  if (result.status !== 0) {
+    return `[exit ${result.status}]\n${out || "(no output)"}`;
+  }
   return out || "(no output)";
 }
