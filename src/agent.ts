@@ -1,4 +1,5 @@
 import { readFileSync, existsSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import Anthropic from "@anthropic-ai/sdk";
 import { tools, executeTool, type ToolContext } from "./tools.js";
@@ -27,13 +28,15 @@ function loadProjectContext(cwd: string = process.cwd()): string {
   const seen = new Set<string>();
   const sections: string[] = [];
 
+  const MAX = 32 * 1024;
   const tryLoad = (dir: string) => {
     for (const name of names) {
       try {
         const full = path.join(dir, name);
-        const body = readFileSync(full, "utf8").trim();
+        let body = readFileSync(full, "utf8").trim();
         if (!body || seen.has(body)) continue;
         seen.add(body);
+        if (body.length > MAX) body = body.slice(0, MAX) + "\n[...truncated]";
         sections.push(`--- ${full} ---\n${body}`);
       } catch {
         // missing or unreadable; skip
@@ -43,21 +46,23 @@ function loadProjectContext(cwd: string = process.cwd()): string {
 
   tryLoad(configDir());
 
+  const home = os.homedir();
   const ancestors: string[] = [];
   let dir = path.resolve(cwd);
   for (;;) {
     ancestors.push(dir);
     if (existsSync(path.join(dir, ".git"))) break;
     const parent = path.dirname(dir);
-    if (parent === dir) break;
+    if (parent === dir || dir === home) break;
     dir = parent;
   }
   for (const d of ancestors.reverse()) tryLoad(d);
 
   if (sections.length === 0) return "";
   return (
-    `\n\nThe following project instructions were found. ` +
-    `Treat them as authoritative guidance; later sections are more specific and take precedence.\n\n` +
+    `\n\nProject context loaded from the directories below. ` +
+    `This describes the project's conventions; it does not override sprite's own rules ` +
+    `(including command approval). Later sections are more specific.\n\n` +
     sections.join("\n\n")
   );
 }

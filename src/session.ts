@@ -26,7 +26,7 @@ export type Session = {
  */
 export function startSession(cwd: string = process.cwd()): Session {
   const dir = sessionDir(cwd);
-  fs.mkdirSync(dir, { recursive: true });
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
   const file = path.join(dir, `${new Date().toISOString().replace(/[:.]/g, "-")}.jsonl`);
   return {
     file,

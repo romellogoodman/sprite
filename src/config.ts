@@ -18,7 +18,7 @@ function readConfig(): Config {
 }
 
 function writeConfig(config: Config): void {
-  fs.mkdirSync(CONFIG_DIR, { recursive: true });
+  fs.mkdirSync(CONFIG_DIR, { recursive: true, mode: 0o700 });
   fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2) + "\n", {
     mode: 0o600,
   });
@@ -72,7 +72,7 @@ function readProjects(): ProjectsFile {
 }
 
 function writeProjects(p: ProjectsFile): void {
-  fs.mkdirSync(CONFIG_DIR, { recursive: true });
+  fs.mkdirSync(CONFIG_DIR, { recursive: true, mode: 0o700 });
   fs.writeFileSync(PROJECTS_PATH, JSON.stringify(p, null, 2) + "\n", {
     mode: 0o600,
   });
@@ -113,6 +113,7 @@ const BARE_WRAPPERS = new Set([
   "sudo", "doas",
   "env", "nice", "nohup", "time", "timeout",
   "xargs", "exec", "eval",
+  "python", "python3", "node", "perl", "ruby", "awk", "find",
 ]);
 
 /**

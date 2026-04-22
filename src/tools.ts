@@ -2,6 +2,40 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import type Anthropic from "@anthropic-ai/sdk";
+import { configDir } from "./config.js";
+
+/** The directory edits are confined to: the git root above cwd, or cwd itself. */
+function workspaceRoot(): string {
+  let dir = process.cwd();
+  for (;;) {
+    if (fs.existsSync(path.join(dir, ".git"))) return dir;
+    const parent = path.dirname(dir);
+    if (parent === dir) return process.cwd();
+    dir = parent;
+  }
+}
+
+const WORKSPACE = workspaceRoot();
+const CONFIG_DIR = configDir();
+
+function isInside(child: string, parent: string): boolean {
+  const rel = path.relative(parent, child);
+  return rel !== "" && !rel.startsWith("..") && !path.isAbsolute(rel);
+}
+
+/** Refuse writes outside the workspace or anywhere under sprite's own config. */
+function assertWritable(relPath: string): string {
+  const abs = path.resolve(relPath);
+  if (isInside(abs, CONFIG_DIR) || abs === CONFIG_DIR) {
+    throw new Error(`Refusing to edit sprite's own config: ${abs}`);
+  }
+  if (!isInside(abs, WORKSPACE) && abs !== WORKSPACE) {
+    throw new Error(
+      `Refusing to edit outside the workspace (${WORKSPACE}): ${abs}`,
+    );
+  }
+  return abs;
+}
 
 export const tools: Anthropic.Tool[] = [
   {
@@ -38,7 +72,7 @@ export const tools: Anthropic.Tool[] = [
   {
     name: "edit_file",
     description:
-      "Edit a file by replacing an exact string match. If the file does not exist and old_str is empty, the file is created with new_str as its contents. old_str must match exactly once in the file.",
+      "Edit a file by replacing an exact string match. If the file does not exist and old_str is empty, the file is created with new_str as its contents. old_str must match exactly once in the file. Writes are confined to the current project (the git root); paths outside it are refused.",
     input_schema: {
       type: "object",
       properties: {
@@ -149,6 +183,7 @@ function listFiles(relPath: string): string {
 }
 
 function editFile(relPath: string, oldStr: string, newStr: string): string {
+  assertWritable(relPath);
   const exists = fs.existsSync(relPath);
 
   if (!exists) {
@@ -178,7 +213,7 @@ function editFile(relPath: string, oldStr: string, newStr: string): string {
     );
   }
 
-  fs.writeFileSync(relPath, content.replace(oldStr, newStr), "utf8");
+  fs.writeFileSync(relPath, content.replace(oldStr, () => newStr), "utf8");
   return `Edited ${relPath}`;
 }
 
