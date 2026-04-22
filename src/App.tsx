@@ -3,7 +3,7 @@ import { Box, Text, useApp, useInput } from "ink";
 import TextInput from "ink-text-input";
 import Spinner from "ink-spinner";
 import type Anthropic from "@anthropic-ai/sdk";
-import { runTurn, type AgentEvent } from "./agent.js";
+import { runTurn, compactHistory, type AgentEvent } from "./agent.js";
 import type { BashApproval, ToolContext } from "./tools.js";
 import { PromptInput } from "./PromptInput.js";
 import { startSession, loadLastSession, type Session } from "./session.js";
@@ -120,6 +120,32 @@ export function App({
       setLines([]);
       setHistory([]);
       setSession(startSession());
+      return;
+    }
+
+    if (text === "/compact") {
+      setInput("");
+      if (history.length === 0) {
+        push({ kind: "error", text: "Nothing to compact yet." });
+        return;
+      }
+      setBusy(true);
+      push({ kind: "user", text: "/compact" });
+      try {
+        const before = history.length;
+        const compacted = await compactHistory(apiKey, history);
+        setHistory(compacted);
+        session.save(compacted);
+        push({
+          kind: "assistant",
+          text: `Compacted ${before} messages into a summary. Context is fresh; keep going.`,
+        });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        push({ kind: "error", text: msg });
+      } finally {
+        setBusy(false);
+      }
       return;
     }
 

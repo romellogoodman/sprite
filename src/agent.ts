@@ -94,6 +94,42 @@ export type AgentEvent =
   | { type: "tool_result"; id: string; name: string; output: string; isError: boolean };
 
 /**
+ * Summarize the conversation so far and return a fresh history containing
+ * just that summary as a single user message. Used by /compact to keep long
+ * sessions under the context limit without losing the thread.
+ */
+export async function compactHistory(
+  apiKey: string,
+  history: Anthropic.MessageParam[],
+): Promise<Anthropic.MessageParam[]> {
+  if (history.length === 0) return history;
+  const client = new Anthropic({ apiKey });
+  const resp = await client.messages.create({
+    model: MODEL,
+    max_tokens: 4000,
+    system:
+      "Summarize the conversation so far for handoff to another assistant. " +
+      "Capture: what the user is trying to do, key decisions and their rationale, " +
+      "files touched, commands run, current state, and anything still open. " +
+      "Be concrete and concise; this replaces the full transcript.",
+    messages: [
+      ...history,
+      { role: "user", content: "Summarize the conversation above for handoff." },
+    ],
+  });
+  const summary = resp.content
+    .filter((b): b is Anthropic.TextBlock => b.type === "text")
+    .map((b) => b.text)
+    .join("\n");
+  return [
+    {
+      role: "user",
+      content: `[Context from an earlier session, summarized by /compact:]\n\n${summary}`,
+    },
+  ];
+}
+
+/**
  * Run one user turn through the agent loop.
  * Appends the user message to history, then loops model → tools → model
  * until stop_reason is end_turn. Emits events for UI rendering.
