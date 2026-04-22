@@ -5,7 +5,24 @@ import Anthropic from "@anthropic-ai/sdk";
 import { tools, executeTool, type ToolContext } from "./tools.js";
 import { configDir } from "./config.js";
 
-const MODEL = "claude-opus-4-7";
+const DEFAULT_MODEL = "claude-opus-4-7";
+
+// Read lazily so --model (which sets the env var after module import) is seen.
+export function model(): string {
+  return process.env.SPRITE_MODEL || DEFAULT_MODEL;
+}
+
+// Approximate context windows for the % indicator. Unknown models fall back
+// to 200K so auto-compact errs toward triggering early rather than late.
+const CONTEXT_WINDOWS: Record<string, number> = {
+  "claude-opus-4-7": 1_000_000,
+  "claude-opus-4-6": 1_000_000,
+  "claude-sonnet-4-6": 1_000_000,
+  "claude-haiku-4-5": 200_000,
+};
+export function contextWindow(): number {
+  return CONTEXT_WINDOWS[model()] ?? 200_000;
+}
 
 const BASE_SYSTEM_PROMPT = `You are sprite, a coding assistant working in the user's current directory.
 
@@ -111,7 +128,7 @@ export async function compactHistory(
   if (history.length === 0) return history;
   const client = new Anthropic({ apiKey });
   const resp = await client.messages.create({
-    model: MODEL,
+    model: model(),
     max_tokens: 4000,
     system:
       "Summarize the conversation so far for handoff to another assistant. " +
@@ -158,7 +175,7 @@ export async function runTurn(
 
   while (true) {
     const stream = client.messages.stream({
-      model: MODEL,
+      model: model(),
       max_tokens: 16000,
       thinking: { type: "adaptive" },
       output_config: { effort: "xhigh" },
