@@ -5,6 +5,7 @@ import { runPrint } from "./print.js";
 
 const argv = process.argv.slice(2);
 const trust = argv.includes("--trust");
+const cont = argv.includes("-c") || argv.includes("--continue");
 
 const pIdx = argv.findIndex((a) => a === "-p" || a === "--print");
 if (pIdx !== -1) {
@@ -15,5 +16,5 @@ if (pIdx !== -1) {
   }
   await runPrint(prompt, trust);
 } else {
-  render(<App trust={trust} />);
+  render(<App trust={trust} resume={cont} />);
 }

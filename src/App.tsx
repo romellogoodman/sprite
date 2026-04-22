@@ -6,6 +6,7 @@ import type Anthropic from "@anthropic-ai/sdk";
 import { runTurn, type AgentEvent } from "./agent.js";
 import type { BashApproval, ToolContext } from "./tools.js";
 import { PromptInput } from "./PromptInput.js";
+import { startSession, loadLastSession, type Session } from "./session.js";
 import {
   loadApiKey,
   saveApiKey,
@@ -28,15 +29,27 @@ type PendingBash = {
   resolve: (a: BashApproval) => void;
 };
 
-export function App({ trust = false }: { trust?: boolean }) {
+export function App({
+  trust = false,
+  resume = false,
+}: { trust?: boolean; resume?: boolean }) {
   const { exit } = useApp();
   const [apiKey, setApiKey] = useState<string | undefined>(() => loadApiKey());
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
-  const [lines, setLines] = useState<DisplayLine[]>([]);
-  const [history, setHistory] = useState<Anthropic.MessageParam[]>([]);
+  const [lines, setLines] = useState<DisplayLine[]>(() => {
+    if (!resume) return [];
+    const prev = loadLastSession();
+    return prev.length > 0
+      ? [{ kind: "assistant", text: `(resumed — ${prev.length} prior messages in context)` }]
+      : [{ kind: "error", text: "No prior session to continue in this directory." }];
+  });
+  const [history, setHistory] = useState<Anthropic.MessageParam[]>(() =>
+    resume ? loadLastSession() : [],
+  );
   const [inputHistory, setInputHistory] = useState<string[]>([]);
   const [pendingBash, setPendingBash] = useState<PendingBash | null>(null);
+  const [session, setSession] = useState<Session>(() => startSession());
 
   const push = (line: DisplayLine) =>
     setLines((prev) => [...prev, line]);
@@ -106,6 +119,7 @@ export function App({ trust = false }: { trust?: boolean }) {
       setInput("");
       setLines([]);
       setHistory([]);
+      setSession(startSession());
       return;
     }
 
@@ -126,6 +140,7 @@ export function App({ trust = false }: { trust?: boolean }) {
     try {
       const newHistory = await runTurn(apiKey, history, text, toolCtx, handleEvent);
       setHistory(newHistory);
+      session.save(newHistory);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       push({ kind: "error", text: msg });
