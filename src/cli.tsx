@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { render } from "ink";
-import { App } from "./App.js";
+import { App } from "./ui/App.js";
 import { runPrint } from "./print.js";
 
 const argv = process.argv.slice(2);

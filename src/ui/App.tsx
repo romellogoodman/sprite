@@ -1,42 +1,24 @@
 import { useEffect, useRef, useState } from "react";
 import { Box, Text, useApp, useInput } from "ink";
-import TextInput from "ink-text-input";
 import Spinner from "ink-spinner";
 import type Anthropic from "@anthropic-ai/sdk";
-import {
-  runTurn,
-  compactHistory,
-  model,
-  contextWindow,
-  type AgentEvent,
-} from "./agent.js";
-import { bash, type BashApproval, type ToolContext } from "./tools.js";
-import { PromptInput } from "./PromptInput.js";
-import { Markdown } from "./Markdown.js";
-import { startSession, loadLastSession, type Session } from "./session.js";
-import { poem } from "./poem.js";
+import { runTurn, compactHistory, type AgentEvent } from "../agent.js";
+import { bash, type BashApproval, type ToolContext } from "../tools.js";
+import { startSession, loadLastSession, type Session } from "../session.js";
+import { poem } from "../poem.js";
 import {
   loadApiKey,
   saveApiKey,
   clearApiKey,
-  configPath,
   isBashAllowed,
   allowBashPrefix,
   suggestBashPrefix,
-} from "./config.js";
-
-type DisplayLine =
-  | { kind: "user"; text: string }
-  | { kind: "assistant"; text: string }
-  | {
-      kind: "tool";
-      id: string;
-      name: string;
-      input: string;
-      output?: string;
-      isError?: boolean;
-    }
-  | { kind: "error"; text: string };
+} from "../config.js";
+import { PromptInput } from "./PromptInput.js";
+import { Header } from "./Header.js";
+import { Line, type DisplayLine } from "./Line.js";
+import { BashConfirm } from "./BashConfirm.js";
+import { Login } from "./Login.js";
 
 type PendingBash = {
   command: string;
@@ -347,195 +329,6 @@ export function App({
   );
 }
 
-function Header({ contextUsed }: { contextUsed: number }) {
-  const cwd = process.cwd();
-  const home = process.env.HOME ?? "";
-  const pretty =
-    home && cwd.startsWith(home) ? "~" + cwd.slice(home.length) : cwd;
-  const pct = Math.round((100 * contextUsed) / contextWindow());
-  return (
-    <Box
-      flexDirection="column"
-      borderStyle="round"
-      borderColor="cyan"
-      paddingX={1}
-      marginTop={1}
-      marginBottom={1}
-    >
-      <Text>
-        <Text color="cyan" bold>
-          sprite
-        </Text>
-        <Text dimColor> · a small helping hand inside your computer</Text>
-      </Text>
-      <Text dimColor>
-        cwd: {pretty} · {model()}
-        {contextUsed > 0 && (
-          <Text color={pct >= 75 ? "yellow" : undefined}> · {pct}% context</Text>
-        )}
-      </Text>
-      <Box marginTop={1}>
-        <Text dimColor>
-          <Text color="cyan">!</Text> shell <Text color="cyan">@</Text> file{" "}
-          <Text color="cyan">/</Text> commands <Text color="cyan">↑↓</Text>{" "}
-          history
-        </Text>
-      </Box>
-    </Box>
-  );
-}
-
-function Line({ line, verbose }: { line: DisplayLine; verbose: boolean }) {
-  switch (line.kind) {
-    case "user":
-      return (
-        <Box marginTop={1}>
-          <Text color="cyan">❯ </Text>
-          <Text>{line.text}</Text>
-        </Box>
-      );
-    case "assistant":
-      return (
-        <Box marginTop={1} flexDirection="column">
-          <Markdown>{line.text}</Markdown>
-        </Box>
-      );
-    case "tool": {
-      const done = line.output !== undefined;
-      const color = !done ? "yellow" : line.isError ? "red" : "green";
-      return (
-        <Box marginLeft={2} marginTop={1} flexDirection="column">
-          <Text>
-            <Text color={color}>●</Text> <Text bold>{line.name}</Text>
-            {line.input ? <Text dimColor> {line.input}</Text> : null}
-          </Text>
-          {done && (
-            <Box marginLeft={2} flexDirection="column">
-              <ToolOutput text={verbose ? line.output! : clip(line.output!)} />
-            </Box>
-          )}
-        </Box>
-      );
-    }
-    case "error":
-      return (
-        <Box marginTop={1}>
-          <Text color="red">✗ {line.text}</Text>
-        </Box>
-      );
-  }
-}
-
-function ToolOutput({ text }: { text: string }) {
-  return (
-    <>
-      {text.split("\n").map((l, i) => {
-        if (l.startsWith("+ ")) {
-          return (
-            <Text key={i} backgroundColor="#1c3b1c" color="greenBright">
-              {l}
-            </Text>
-          );
-        }
-        if (l.startsWith("- ")) {
-          return (
-            <Text key={i} backgroundColor="#4a1e1e" color="redBright">
-              {l}
-            </Text>
-          );
-        }
-        return (
-          <Text key={i} dimColor>
-            {l || " "}
-          </Text>
-        );
-      })}
-    </>
-  );
-}
-
-function BashConfirm({ command }: { command: string }) {
-  const prefix = suggestBashPrefix(command);
-  return (
-    <Box
-      flexDirection="column"
-      borderStyle="round"
-      borderColor="yellow"
-      paddingX={1}
-    >
-      <Text>
-        sprite wants to run: <Text color="yellow">{command}</Text>
-      </Text>
-      <Box marginTop={1} flexDirection="column">
-        <Text>
-          <Text color="cyan">[y]</Text> run once
-        </Text>
-        <Text>
-          <Text color="cyan">[a]</Text> always allow{" "}
-          <Text dimColor>"{prefix} …" in this project</Text>
-        </Text>
-        <Text>
-          <Text color="cyan">[n]</Text> deny
-        </Text>
-      </Box>
-    </Box>
-  );
-}
-
-function Login({ onLogin }: { onLogin: (key: string) => void }) {
-  const [value, setValue] = useState("");
-  const [error, setError] = useState<string | null>(null);
-
-  const submit = (v: string) => {
-    const key = v.trim();
-    if (!key) return;
-    if (!key.startsWith("sk-ant-")) {
-      setError("That doesn't look like an Anthropic key (expected sk-ant-…).");
-      return;
-    }
-    setError(null);
-    onLogin(key);
-  };
-
-  return (
-    <Box flexDirection="column">
-      <Box
-        flexDirection="column"
-        borderStyle="round"
-        borderColor="cyan"
-        paddingX={1}
-        marginTop={1}
-        marginBottom={1}
-      >
-        <Text>
-          <Text color="cyan" bold>
-            sprite
-          </Text>
-          <Text dimColor> · a small helping hand inside your computer</Text>
-        </Text>
-      </Box>
-      <Text>No API key found. Paste your Anthropic API key:</Text>
-      <Text dimColor>
-        (saved to {configPath()}; env ANTHROPIC_API_KEY overrides)
-      </Text>
-      <Box marginTop={1}>
-        <Text color="cyan">key ❯ </Text>
-        <TextInput
-          value={value}
-          onChange={setValue}
-          onSubmit={submit}
-          mask="•"
-        />
-      </Box>
-      {error && (
-        <Box marginTop={1}>
-          <Text color="red">{error}</Text>
-        </Box>
-      )}
-    </Box>
-  );
-}
-
 /** One-line summary of a tool's input for the header, instead of raw JSON. */
 function summarizeInput(name: string, input: unknown): string {
   const o = input as Record<string, unknown>;
@@ -549,14 +342,4 @@ function summarizeInput(name: string, input: unknown): string {
 function fmtTokens(n: number): string {
   if (n < 1000) return String(n);
   return (n / 1000).toFixed(1).replace(/\.0$/, "") + "k";
-}
-
-/** Trim tool output for display: first 6 lines, note how many were hidden. */
-function clip(s: string): string {
-  const lines = s.replace(/\s+$/, "").split("\n");
-  if (lines.length <= 6) return lines.join("\n");
-  return (
-    lines.slice(0, 6).join("\n") +
-    `\n… +${lines.length - 6} more lines (ctrl + o)`
-  );
 }

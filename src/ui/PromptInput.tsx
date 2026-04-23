@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, type ReactNode } from "react";
 import { Box, Text, useInput } from "ink";
 import chalk from "chalk";
-import { findTrigger, getCompletions, type Completion } from "./completion.js";
+import { findTrigger, getCompletions, type Completion } from "../completion.js";
 
 type Props = {
   value: string;

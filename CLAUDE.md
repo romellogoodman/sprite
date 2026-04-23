@@ -22,8 +22,12 @@ TypeScript/Node (ESM), `@anthropic-ai/sdk`, `ink`+React for the TUI.
 ## Layout
 
 - `src/cli.tsx` — entry; routes to `<App />` or headless `runPrint()`
-- `src/App.tsx` — Ink UI, slash commands
-- `src/PromptInput.tsx` — input line: cursor, history, bracketed paste
+- `src/ui/` — Ink/React components
+  - `App.tsx` — top-level state, slash commands, event loop wiring
+  - `Line.tsx` — renders one transcript row; owns `DisplayLine`
+  - `Markdown.tsx` — marked→Ink renderer for assistant text
+  - `PromptInput.tsx` — input: cursor, history, bracketed paste
+  - `Header.tsx`, `BashConfirm.tsx`, `Login.tsx`
 - `src/agent.ts` — `runTurn()` loop, system prompt, `/compact`, `@path` expansion
 - `src/tools.ts` — the four tools + 50 KB output cap
 - `src/print.ts` — `-p` one-shot mode
