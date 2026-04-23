@@ -12,6 +12,7 @@ import {
 } from "./agent.js";
 import { bash, type BashApproval, type ToolContext } from "./tools.js";
 import { PromptInput } from "./PromptInput.js";
+import { Markdown } from "./Markdown.js";
 import { startSession, loadLastSession, type Session } from "./session.js";
 import { poem } from "./poem.js";
 import {
@@ -396,7 +397,7 @@ function Line({ line, verbose }: { line: DisplayLine; verbose: boolean }) {
     case "assistant":
       return (
         <Box marginTop={1} flexDirection="column">
-          <Text>{line.text}</Text>
+          <Markdown>{line.text}</Markdown>
         </Box>
       );
     case "tool": {
