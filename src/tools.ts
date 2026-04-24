@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
-import { spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import type Anthropic from "@anthropic-ai/sdk";
 import { configDir } from "./config.js";
 
@@ -226,7 +226,7 @@ async function runBash(command: string, ctx: ToolContext): Promise<string> {
       ctx.allowPrefix(ctx.suggestPrefix(command));
     }
   }
-  return bash(command);
+  return await bash(command);
 }
 
 function readFile(relPath: string, offset = 1, limit = 2000): string {
@@ -358,24 +358,64 @@ function renderDiff(content: string, oldStr: string, newStr: string): string {
   return out.join("\n");
 }
 
-export function bash(command: string): string {
-  const result = spawnSync(command, {
-    shell: true,
-    encoding: "utf8",
-    timeout: 120_000,
-    maxBuffer: 10 * 1024 * 1024,
+/**
+ * Kill a process and everything it spawned. `detached: true` below puts the
+ * child in its own process group (pgid = pid), so on POSIX a negative pid
+ * signals the whole group — otherwise `npm run dev` dies but its node child
+ * lives on. Windows has no process groups in the same sense; taskkill /T
+ * walks the tree.
+ */
+function killTree(pid: number): void {
+  try {
+    if (process.platform === "win32") {
+      spawn("taskkill", ["/pid", String(pid), "/T", "/F"]);
+    } else {
+      process.kill(-pid, "SIGTERM");
+      setTimeout(() => {
+        try {
+          process.kill(-pid, "SIGKILL");
+        } catch {}
+      }, 2000).unref();
+    }
+  } catch {}
+}
+
+export function bash(command: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, {
+      shell: true,
+      detached: process.platform !== "win32",
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+
+    let out = "";
+    let killedBy: string | null = null;
+    child.stdout.setEncoding("utf8").on("data", (d) => (out += d));
+    child.stderr.setEncoding("utf8").on("data", (d) => (out += d));
+
+    const timer = setTimeout(() => {
+      killedBy = "timeout after 120s";
+      if (child.pid) killTree(child.pid);
+    }, 120_000);
+
+    child.on("error", (err) => {
+      clearTimeout(timer);
+      reject(err);
+    });
+
+    // 'close' (not 'exit') so stdio is fully drained before we read `out` —
+    // otherwise a detached grandchild holding the pipe can truncate output.
+    child.on("close", (code, signal) => {
+      clearTimeout(timer);
+      if (killedBy) {
+        reject(new Error(`killed (${killedBy})\n${out || "(no output)"}`));
+      } else if (signal) {
+        reject(new Error(`killed by ${signal}\n${out || "(no output)"}`));
+      } else if (code !== 0) {
+        resolve(`[exit ${code}]\n${out || "(no output)"}`);
+      } else {
+        resolve(out || "(no output)");
+      }
+    });
   });
-
-  if (result.error) {
-    throw result.error;
-  }
-
-  const out = [result.stdout, result.stderr].filter(Boolean).join("");
-  if (result.signal) {
-    throw new Error(`killed by ${result.signal}\n${out || "(no output)"}`);
-  }
-  if (result.status !== 0) {
-    return `[exit ${result.status}]\n${out || "(no output)"}`;
-  }
-  return out || "(no output)";
 }

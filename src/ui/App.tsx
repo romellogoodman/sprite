@@ -213,12 +213,13 @@ export function App({
       );
       push({ kind: "user", text: `! ${cmd}` });
       try {
+        const output = await bash(cmd);
         push({
           kind: "tool",
           id: "",
           name: "$",
           input: cmd,
-          output: bash(cmd),
+          output,
           isError: false,
         });
       } catch (err) {
