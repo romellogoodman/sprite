@@ -65,6 +65,7 @@ export function App({
   const [verbose, setVerbose] = useState(false);
   const [pendingBash, setPendingBash] = useState<PendingBash | null>(null);
   const [session, setSession] = useState<Session>(() => startSession());
+  const abortRef = useRef<AbortController | null>(null);
 
   const push = (line: DisplayLine) => setLines((prev) => [...prev, line]);
 
@@ -81,6 +82,16 @@ export function App({
 
   useInput((input, key) => {
     if (key.ctrl && input === "o") setVerbose((v) => !v);
+    if (key.escape && busy) {
+      abortRef.current?.abort();
+      // If we were waiting on a bash confirmation, let it go so the
+      // confirmBash promise resolves and the turn can unwind.
+      if (pendingBash) {
+        const { resolve } = pendingBash;
+        setPendingBash(null);
+        resolve("no");
+      }
+    }
   });
 
   useEffect(() => {
@@ -251,6 +262,8 @@ export function App({
     setBusy(true);
     push({ kind: "user", text });
 
+    const controller = new AbortController();
+    abortRef.current = controller;
     try {
       const newHistory = await runTurn(
         apiKey,
@@ -258,13 +271,19 @@ export function App({
         text,
         toolCtx,
         handleEvent,
+        controller.signal,
       );
       setHistory(newHistory);
       session.save(newHistory);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      push({ kind: "error", text: msg });
+      if (controller.signal.aborted) {
+        push({ kind: "assistant", text: "(cancelled)" });
+      } else {
+        const msg = err instanceof Error ? err.message : String(err);
+        push({ kind: "error", text: msg });
+      }
     } finally {
+      abortRef.current = null;
       setBusy(false);
     }
   };
@@ -294,6 +313,7 @@ export function App({
                 {elapsed}s
                 {tokens.in + tokens.out > 0 &&
                   ` · ${fmtTokens(tokens.in + tokens.out)} tokens`}
+                {" · esc to stop"}
               </Text>
             )}
           </>

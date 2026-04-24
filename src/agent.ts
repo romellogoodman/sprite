@@ -207,6 +207,7 @@ export async function runTurn(
   userMessage: string,
   ctx: ToolContext,
   onEvent: (e: AgentEvent) => void,
+  signal?: AbortSignal,
 ): Promise<Anthropic.MessageParam[]> {
   const client = new Anthropic({ apiKey });
   const system = buildSystemPrompt();
@@ -218,15 +219,19 @@ export async function runTurn(
   ];
 
   while (true) {
-    const stream = client.messages.stream({
-      model: model(),
-      max_tokens: 16000,
-      ...modelParams(),
-      cache_control: { type: "ephemeral" },
-      system,
-      tools,
-      messages,
-    });
+    signal?.throwIfAborted();
+    const stream = client.messages.stream(
+      {
+        model: model(),
+        max_tokens: 16000,
+        ...modelParams(),
+        cache_control: { type: "ephemeral" },
+        system,
+        tools,
+        messages,
+      },
+      { signal },
+    );
 
     stream.on("text", (delta) => onEvent({ type: "text", text: delta }));
 
@@ -263,11 +268,13 @@ export async function runTurn(
 
     const toolResults: Anthropic.ToolResultBlockParam[] = [];
     for (const tu of toolUses) {
+      signal?.throwIfAborted();
       try {
         const output = await executeTool(
           tu.name,
           tu.input as Record<string, unknown>,
           ctx,
+          signal,
         );
         onEvent({
           type: "tool_result",
@@ -282,6 +289,9 @@ export async function runTurn(
           content: output,
         });
       } catch (err) {
+        // Don't turn an abort into a tool error that gets fed back to the
+        // model; just let it propagate so the whole turn unwinds.
+        if (signal?.aborted) throw err;
         const msg = err instanceof Error ? err.message : String(err);
         onEvent({
           type: "tool_result",

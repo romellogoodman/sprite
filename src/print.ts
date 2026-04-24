@@ -34,6 +34,12 @@ export async function runPrint(prompt: string, trust: boolean): Promise<void> {
     },
   };
 
+  const controller = new AbortController();
+  process.once("SIGINT", () => {
+    controller.abort();
+    process.stderr.write("\n(cancelled)\n");
+  });
+
   try {
     await runTurn(apiKey, [], prompt, ctx, (e) => {
       if (e.type === "text") {
@@ -44,8 +50,9 @@ export async function runPrint(prompt: string, trust: boolean): Promise<void> {
         const mark = e.isError ? "✗" : "✓";
         process.stderr.write(`${mark} ${e.name}\n`);
       }
-    });
+    }, controller.signal);
   } catch (err) {
+    if (controller.signal.aborted) process.exit(130);
     const msg = err instanceof Error ? err.message : String(err);
     process.stderr.write(`✗ ${msg}\n`);
     process.exit(1);

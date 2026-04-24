@@ -189,6 +189,7 @@ export async function executeTool(
   name: string,
   input: ToolInput,
   ctx: ToolContext,
+  signal?: AbortSignal,
 ): Promise<string> {
   switch (name) {
     case "read_file":
@@ -210,13 +211,17 @@ export async function executeTool(
       return editFile(String(input.path), edits);
     }
     case "bash":
-      return capTail(await runBash(String(input.command), ctx));
+      return capTail(await runBash(String(input.command), ctx, signal));
     default:
       throw new Error(`Unknown tool: ${name}`);
   }
 }
 
-async function runBash(command: string, ctx: ToolContext): Promise<string> {
+async function runBash(
+  command: string,
+  ctx: ToolContext,
+  signal?: AbortSignal,
+): Promise<string> {
   if (!ctx.trust && !ctx.isAllowed(command)) {
     const choice = await ctx.confirmBash(command);
     if (choice === "no") {
@@ -226,7 +231,7 @@ async function runBash(command: string, ctx: ToolContext): Promise<string> {
       ctx.allowPrefix(ctx.suggestPrefix(command));
     }
   }
-  return await bash(command);
+  return await bash(command, signal);
 }
 
 function readFile(relPath: string, offset = 1, limit = 2000): string {
@@ -365,6 +370,13 @@ function renderDiff(content: string, oldStr: string, newStr: string): string {
  * lives on. Windows has no process groups in the same sense; taskkill /T
  * walks the tree.
  */
+// Detached children outlive sprite if the user Ctrl+C's us, so track what's
+// running and reap the group on our way out.
+const liveBash = new Set<number>();
+process.once("exit", () => {
+  for (const pid of liveBash) killTree(pid);
+});
+
 function killTree(pid: number): void {
   try {
     if (process.platform === "win32") {
@@ -380,13 +392,15 @@ function killTree(pid: number): void {
   } catch {}
 }
 
-export function bash(command: string): Promise<string> {
+export function bash(command: string, signal?: AbortSignal): Promise<string> {
+  signal?.throwIfAborted();
   return new Promise((resolve, reject) => {
     const child = spawn(command, {
       shell: true,
       detached: process.platform !== "win32",
       stdio: ["ignore", "pipe", "pipe"],
     });
+    if (child.pid) liveBash.add(child.pid);
 
     let out = "";
     let killedBy: string | null = null;
@@ -398,19 +412,31 @@ export function bash(command: string): Promise<string> {
       if (child.pid) killTree(child.pid);
     }, 120_000);
 
+    const onAbort = () => {
+      killedBy = "aborted";
+      if (child.pid) killTree(child.pid);
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+
     child.on("error", (err) => {
       clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
+      if (child.pid) liveBash.delete(child.pid);
       reject(err);
     });
 
     // 'close' (not 'exit') so stdio is fully drained before we read `out` —
     // otherwise a detached grandchild holding the pipe can truncate output.
-    child.on("close", (code, signal) => {
+    child.on("close", (code, sig) => {
       clearTimeout(timer);
-      if (killedBy) {
+      signal?.removeEventListener("abort", onAbort);
+      if (child.pid) liveBash.delete(child.pid);
+      if (killedBy === "aborted") {
+        reject(new DOMException("bash aborted", "AbortError"));
+      } else if (killedBy) {
         reject(new Error(`killed (${killedBy})\n${out || "(no output)"}`));
-      } else if (signal) {
-        reject(new Error(`killed by ${signal}\n${out || "(no output)"}`));
+      } else if (sig) {
+        reject(new Error(`killed by ${sig}\n${out || "(no output)"}`));
       } else if (code !== 0) {
         resolve(`[exit ${code}]\n${out || "(no output)"}`);
       } else {
