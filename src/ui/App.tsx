@@ -36,7 +36,14 @@ export function App({
   const { exit } = useApp();
   const [apiKey, setApiKey] = useState<string | undefined>(() => loadApiKey());
   const [input, setInput] = useState("");
-  const [busy, setBusy] = useState(false);
+  // `busy` drives rendering; `busyRef` is what handleSubmit reads so the
+  // queue check isn't stale inside the long-lived async closure.
+  const [busy, setBusyState] = useState(false);
+  const busyRef = useRef(false);
+  const setBusy = (v: boolean) => {
+    busyRef.current = v;
+    setBusyState(v);
+  };
   const [phrase, setPhrase] = useState("working");
   const [elapsed, setElapsed] = useState(0);
   const [tokens, setTokens] = useState({ in: 0, out: 0 });
@@ -67,6 +74,13 @@ export function App({
   const [pendingBash, setPendingBash] = useState<PendingBash | null>(null);
   const [session, setSession] = useState<Session>(() => startSession());
   const abortRef = useRef<AbortController | null>(null);
+  const queuedRef = useRef<string | null>(null);
+  const [queued, setQueuedState] = useState<string | null>(null);
+  const setQueued = (v: string | null) => {
+    queuedRef.current = v;
+    setQueuedState(v);
+  };
+  const handleSubmitRef = useRef<(v: string) => Promise<void>>(async () => {});
 
   const push = (line: DisplayLine) => setLines((prev) => [...prev, line]);
 
@@ -81,10 +95,14 @@ export function App({
       }),
   }).current;
 
-  useInput((input, key) => {
-    if (key.ctrl && input === "o") setVerbose((v) => !v);
-    if (key.escape && busy) {
+  useInput((ch, key) => {
+    if (key.ctrl && ch === "o") setVerbose((v) => !v);
+    // Esc on an empty prompt cancels the turn. With text in the prompt,
+    // PromptInput's own Esc handler clears it first — so it's esc-esc to
+    // cancel while typing a follow-up.
+    if (key.escape && busy && input === "") {
       abortRef.current?.abort();
+      setQueued(null);
       // If we were waiting on a bash confirmation, let it go so the
       // confirmBash promise resolves and the turn can unwind.
       if (pendingBash) {
@@ -105,6 +123,18 @@ export function App({
       1000,
     );
     return () => clearInterval(t);
+  }, [busy]);
+
+  // Drain the follow-up queue whenever a turn ends. Runs post-render so
+  // handleSubmit (via the ref) sees the fresh history; an inline recursive
+  // call from inside handleSubmit would reuse the stale closure and drop
+  // the just-completed turn. Esc clears the queue before abort, so
+  // cancelled turns don't auto-continue.
+  useEffect(() => {
+    if (busy || queuedRef.current === null) return;
+    const next = queuedRef.current;
+    setQueued(null);
+    void handleSubmitRef.current(next);
   }, [busy]);
 
   useInput(
@@ -171,7 +201,15 @@ export function App({
 
   const handleSubmit = async (value: string) => {
     const text = value.trim();
-    if (!text || busy) return;
+    if (!text) return;
+
+    // A turn is already running — stash this for when it finishes. One
+    // slot; a second Enter replaces the first.
+    if (busyRef.current) {
+      setInput("");
+      setQueued(text);
+      return;
+    }
 
     if (text === "exit" || text === "quit") {
       exit();
@@ -322,6 +360,7 @@ export function App({
       setBusy(false);
     }
   };
+  handleSubmitRef.current = handleSubmit;
 
   return (
     <Box flexDirection="column">
@@ -333,32 +372,38 @@ export function App({
         ))}
       </Box>
 
-      <Box>
-        {pendingBash ? (
-          <BashConfirm command={pendingBash.command} />
-        ) : busy ? (
-          <>
-            <Text color="cyan">
-              <Spinner type="dots" />
-            </Text>
-            <Text dimColor> {phrase}…</Text>
-            {elapsed >= 5 && (
-              <Text dimColor>
-                {" "}
-                {elapsed}s
-                {tokens.in + tokens.out > 0 &&
-                  ` · ${fmtTokens(tokens.in + tokens.out)} tokens`}
-                {" · esc to stop"}
+      {pendingBash ? (
+        <BashConfirm command={pendingBash.command} />
+      ) : (
+        <Box flexDirection="column">
+          {busy && (
+            <Box>
+              <Text color="cyan">
+                <Spinner type="dots" />
               </Text>
-            )}
-          </>
-        ) : (
+              <Text dimColor> {phrase}…</Text>
+              {elapsed >= 5 && (
+                <Text dimColor>
+                  {" "}
+                  {elapsed}s
+                  {tokens.in + tokens.out > 0 &&
+                    ` · ${fmtTokens(tokens.in + tokens.out)} tokens`}
+                  {" · esc to stop"}
+                </Text>
+              )}
+            </Box>
+          )}
+          {queued !== null && (
+            <Text dimColor>
+              {"  "}↳ queued: {queued.length > 60 ? queued.slice(0, 60) + "…" : queued}
+            </Text>
+          )}
           <PromptInput
             prefix={
               bashMode ? (
                 <Text color="yellow">! </Text>
               ) : (
-                <Text color="cyan">❯ </Text>
+                <Text color={busy ? "gray" : "cyan"}>❯ </Text>
               )
             }
             value={input}
@@ -376,11 +421,13 @@ export function App({
             placeholder={
               bashMode
                 ? "run a shell command"
-                : "ask sprite anything (or 'exit')"
+                : busy
+                  ? "type a follow-up · enter to queue · esc to stop"
+                  : "ask sprite anything (or 'exit')"
             }
           />
-        )}
-      </Box>
+        </Box>
+      )}
     </Box>
   );
 }
