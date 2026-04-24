@@ -223,8 +223,12 @@ export function App({
         h[h.length - 1] === `!${cmd}` ? h : [...h, `!${cmd}`],
       );
       push({ kind: "user", text: `! ${cmd}` });
+      setPhrase(cmd.length > 40 ? cmd.slice(0, 40) + "…" : cmd);
+      setBusy(true);
+      const controller = new AbortController();
+      abortRef.current = controller;
       try {
-        const output = await bash(cmd);
+        const output = await bash(cmd, controller.signal);
         push({
           kind: "tool",
           id: "",
@@ -234,15 +238,22 @@ export function App({
           isError: false,
         });
       } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        push({
-          kind: "tool",
-          id: "",
-          name: "$",
-          input: cmd,
-          output: msg,
-          isError: true,
-        });
+        if (controller.signal.aborted) {
+          push({ kind: "assistant", text: "(cancelled)" });
+        } else {
+          const msg = err instanceof Error ? err.message : String(err);
+          push({
+            kind: "tool",
+            id: "",
+            name: "$",
+            input: cmd,
+            output: msg,
+            isError: true,
+          });
+        }
+      } finally {
+        abortRef.current = null;
+        setBusy(false);
       }
       return;
     }
