@@ -235,6 +235,8 @@ function listFiles(relPath: string): string {
   return JSON.stringify(names, null, 2);
 }
 
+const toLF = (s: string) => s.replace(/\r\n/g, "\n");
+
 function editFile(relPath: string, oldStr: string, newStr: string): string {
   assertWritable(relPath);
   const exists = fs.existsSync(relPath);
@@ -248,7 +250,16 @@ function editFile(relPath: string, oldStr: string, newStr: string): string {
     return `Created ${relPath}`;
   }
 
-  const content = fs.readFileSync(relPath, "utf8");
+  // Match and edit on LF-normalized text so CRLF files still match old_str
+  // coming from the model (which is always LF). Remember the original EOL
+  // and BOM so we can round-trip them on write.
+  const raw = fs.readFileSync(relPath, "utf8");
+  const hasBOM = raw.charCodeAt(0) === 0xfeff;
+  const body = hasBOM ? raw.slice(1) : raw;
+  const eol = body.includes("\r\n") ? "\r\n" : "\n";
+  const content = toLF(body);
+  oldStr = toLF(oldStr);
+  newStr = toLF(newStr);
 
   if (oldStr === "") {
     throw new Error(
@@ -266,7 +277,11 @@ function editFile(relPath: string, oldStr: string, newStr: string): string {
     );
   }
 
-  fs.writeFileSync(relPath, content.replace(oldStr, () => newStr), "utf8");
+  const edited = content.replace(oldStr, () => newStr);
+  const out =
+    (hasBOM ? "\ufeff" : "") +
+    (eol === "\r\n" ? edited.replace(/\n/g, "\r\n") : edited);
+  fs.writeFileSync(relPath, out, "utf8");
   return `Edited ${relPath}\n${renderDiff(content, oldStr, newStr)}`;
 }
 
