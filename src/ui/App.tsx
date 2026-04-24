@@ -155,7 +155,7 @@ export function App({
     } else if (e.type === "compacted") {
       push({
         kind: "assistant",
-        text: `(auto-compacted at ${e.pct}% — ${e.before} messages → summary)`,
+        text: `(auto-compacted at ${e.pct}% — ${e.before} → ${e.after} messages, recent turns kept verbatim)`,
       });
       setContextUsed(0);
     } else if (e.type === "tool_result") {

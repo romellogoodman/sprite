@@ -161,25 +161,65 @@ export type AgentEvent =
   | { type: "tool_use"; id: string; name: string; input: unknown }
   | { type: "tool_result"; id: string; name: string; output: string; isError: boolean }
   | { type: "usage"; input: number; output: number }
-  | { type: "compacted"; before: number; pct: number };
+  | { type: "compacted"; before: number; after: number; pct: number };
+
+/** Rough token count. Good enough to decide where to cut; not for billing. */
+function estimateTokens(m: Anthropic.MessageParam): number {
+  const s =
+    typeof m.content === "string" ? m.content : JSON.stringify(m.content);
+  return Math.ceil(s.length / 4);
+}
 
 /**
- * Summarize the conversation so far and return a fresh history containing
- * just that summary as a single user message. Used by /compact to keep long
- * sessions under the context limit without losing the thread.
+ * A "real" user turn (something the human typed, or a prior compaction
+ * summary) as opposed to a tool_result batch. In sprite those are always
+ * string-content; tool results are always arrays. Cutting here keeps the
+ * tool_use/tool_result pairing intact on both sides of the cut.
+ */
+function isUserTurnStart(m: Anthropic.MessageParam): boolean {
+  return m.role === "user" && typeof m.content === "string";
+}
+
+const KEEP_TOKENS = 20_000;
+
+/**
+ * Walk backward accumulating tokens until we've covered KEEP_TOKENS and are
+ * sitting on a user-turn boundary. Returns the index to cut at — everything
+ * before it gets summarized, everything from it onward is kept verbatim.
+ * Returns 0 if the whole history fits (nothing to summarize).
+ */
+function findCutPoint(history: Anthropic.MessageParam[]): number {
+  let acc = 0;
+  for (let i = history.length - 1; i >= 0; i--) {
+    acc += estimateTokens(history[i]);
+    if (acc >= KEEP_TOKENS && isUserTurnStart(history[i])) return i;
+  }
+  return 0;
+}
+
+/**
+ * Compact the conversation: summarize the older part, keep the recent tail
+ * verbatim so file paths, exact error messages, and in-progress tool state
+ * survive. If no sensible cut point exists, fall back to summarizing
+ * everything (the old behavior).
  */
 export async function compactHistory(
   apiKey: string,
   history: Anthropic.MessageParam[],
 ): Promise<Anthropic.MessageParam[]> {
   if (history.length === 0) return history;
+
+  const cut = findCutPoint(history);
+  const head = cut > 0 ? history.slice(0, cut) : history;
+  const tail = cut > 0 ? history.slice(cut) : [];
+
   const client = new Anthropic({ apiKey });
   const resp = await client.messages.create({
     model: model(),
     max_tokens: 4000,
     system: COMPACT_PROMPT,
     messages: [
-      ...history,
+      ...head,
       { role: "user", content: "Summarize the conversation above for handoff." },
     ],
   });
@@ -187,11 +227,13 @@ export async function compactHistory(
     .filter((b): b is Anthropic.TextBlock => b.type === "text")
     .map((b) => b.text)
     .join("\n");
+
   return [
     {
       role: "user",
-      content: `[Context from an earlier session, summarized by /compact:]\n\n${summary}`,
+      content: `[Context from earlier in this session, summarized by /compact:]\n\n${summary}`,
     },
+    ...tail,
   ];
 }
 
@@ -318,7 +360,7 @@ export async function runTurn(
       const before = messages.length;
       const pct = Math.round((100 * inputTokens) / window);
       messages = await compactHistory(apiKey, messages);
-      onEvent({ type: "compacted", before, pct });
+      onEvent({ type: "compacted", before, after: messages.length, pct });
     }
   }
 }
