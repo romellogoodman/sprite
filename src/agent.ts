@@ -129,6 +129,33 @@ export function expandFileMentions(text: string): string {
   });
 }
 
+// Rigid template so repeated compaction doesn't drift into vagueness: the
+// section headings force the model to keep file paths, open TODOs, and the
+// why behind decisions, instead of smoothing them into prose.
+const COMPACT_PROMPT = `Summarize this coding session for handoff to another assistant who will continue the work. This summary replaces the full transcript, so be concrete: keep file paths, commands, function names, and error messages verbatim. Use exactly these sections:
+
+## Goal
+What the user is trying to accomplish overall.
+
+## Progress
+- Done: what's finished and verified
+- In progress: what's partway
+- Blocked: what's stuck and on what
+
+## Files
+Paths touched, with a few words on what changed in each.
+
+## Decisions
+Choices made and the one-line reason for each.
+
+## Next
+The immediate next step. If there's a command to run, include it.
+
+## Watch out
+Constraints, gotchas, or anything the next assistant must not forget.
+
+Leave a section empty rather than inventing content for it.`;
+
 export type AgentEvent =
   | { type: "text"; text: string }
   | { type: "tool_use"; id: string; name: string; input: unknown }
@@ -150,11 +177,7 @@ export async function compactHistory(
   const resp = await client.messages.create({
     model: model(),
     max_tokens: 4000,
-    system:
-      "Summarize the conversation so far for handoff to another assistant. " +
-      "Capture: what the user is trying to do, key decisions and their rationale, " +
-      "files touched, commands run, current state, and anything still open. " +
-      "Be concrete and concise; this replaces the full transcript.",
+    system: COMPACT_PROMPT,
     messages: [
       ...history,
       { role: "user", content: "Summarize the conversation above for handoff." },
