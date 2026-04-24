@@ -3,6 +3,7 @@ import { Box, Text, useApp, useInput } from "ink";
 import Spinner from "ink-spinner";
 import type Anthropic from "@anthropic-ai/sdk";
 import { runTurn, compactHistory, type AgentEvent } from "../agent.js";
+import { resolveCommand, listCommands } from "../commands.js";
 import { bash, type BashApproval, type ToolContext } from "../tools.js";
 import { startSession, loadLastSession, type Session } from "../session.js";
 import { poem } from "../poem.js";
@@ -267,6 +268,29 @@ export function App({
       return;
     }
 
+    // Custom slash commands: expand /name args to the template body and
+    // send that through runTurn, but show the short form in the transcript.
+    let message = text;
+    if (text.startsWith("/")) {
+      const sp = text.indexOf(" ");
+      const name = sp === -1 ? text.slice(1) : text.slice(1, sp);
+      const args = sp === -1 ? "" : text.slice(sp + 1).trim();
+      const expanded = resolveCommand(name, args);
+      if (expanded === undefined) {
+        setInput("");
+        const avail = listCommands();
+        push({
+          kind: "error",
+          text:
+            avail.length > 0
+              ? `Unknown command /${name}. Available: ${avail.map((n) => `/${n}`).join(", ")}`
+              : `Unknown command /${name}. Put a ${name}.md in ./.sprite/commands/ or ~/.config/sprite/commands/ to define it.`,
+        });
+        return;
+      }
+      message = expanded;
+    }
+
     setInput("");
     setInputHistory((h) => (h[h.length - 1] === text ? h : [...h, text]));
     setPhrase(poem());
@@ -279,7 +303,7 @@ export function App({
       const newHistory = await runTurn(
         apiKey,
         history,
-        text,
+        message,
         toolCtx,
         handleEvent,
         controller.signal,
