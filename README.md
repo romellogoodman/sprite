@@ -4,7 +4,9 @@ A small helping hand inside your computer.
 
 A CLI coding agent: an LLM in a loop with four tools — `read_file`, `list_files`, `edit_file`, `bash`. It works in whatever directory you run it from.
 
-## Run
+## Setup
+
+Clone the repository, install dependencies, and link it globally:
 
 ```sh
 git clone https://github.com/romellogoodman/sprite.git
@@ -13,7 +15,11 @@ npm install
 npm link
 ```
 
-Then from any directory:
+This package is not deployed to npm — link it locally to make the `sprite` command available globally on your system.
+
+## Run
+
+From any directory:
 
 ```sh
 sprite                    # interactive
