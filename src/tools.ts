@@ -84,7 +84,7 @@ export const tools: Anthropic.Tool[] = [
   {
     name: "edit_file",
     description:
-      "Edit a file by replacing an exact string match. If the file does not exist and old_str is empty, the file is created with new_str as its contents. old_str must match exactly once in the file. Writes are confined to the current project (the git root); paths outside it are refused.",
+      "Edit a file by replacing exact string matches. Pass old_str/new_str for a single edit, or an edits array for several non-overlapping edits in one call (e.g. renaming a symbol at every occurrence). Each old_str must match exactly once in the file as it is on disk. If the file does not exist, pass a single empty old_str and the file is created with new_str as its contents. Writes are confined to the current project (the git root); paths outside it are refused.",
     input_schema: {
       type: "object",
       properties: {
@@ -99,10 +99,24 @@ export const tools: Anthropic.Tool[] = [
         },
         new_str: {
           type: "string",
-          description: "Text to replace old_str with, or the full contents when creating a new file.",
+          description:
+            "Text to replace old_str with, or the full contents when creating a new file.",
+        },
+        edits: {
+          type: "array",
+          description:
+            "Multiple edits to apply atomically. Each old_str is matched against the file as it is before any edits are applied; edits must not overlap. Use this instead of old_str/new_str when changing several places at once.",
+          items: {
+            type: "object",
+            properties: {
+              old_str: { type: "string" },
+              new_str: { type: "string" },
+            },
+            required: ["old_str", "new_str"],
+          },
         },
       },
-      required: ["path", "old_str", "new_str"],
+      required: ["path"],
     },
   },
   {
@@ -187,12 +201,14 @@ export async function executeTool(
       );
     case "list_files":
       return cap(listFiles(input.path ? String(input.path) : "."));
-    case "edit_file":
-      return editFile(
-        String(input.path),
-        String(input.old_str),
-        String(input.new_str),
-      );
+    case "edit_file": {
+      const edits = Array.isArray(input.edits)
+        ? (input.edits as Array<{ old_str: unknown; new_str: unknown }>).map(
+            (e) => ({ old_str: String(e.old_str), new_str: String(e.new_str) }),
+          )
+        : [{ old_str: String(input.old_str), new_str: String(input.new_str) }];
+      return editFile(String(input.path), edits);
+    }
     case "bash":
       return capTail(await runBash(String(input.command), ctx));
     default:
@@ -237,16 +253,19 @@ function listFiles(relPath: string): string {
 
 const toLF = (s: string) => s.replace(/\r\n/g, "\n");
 
-function editFile(relPath: string, oldStr: string, newStr: string): string {
+type EditPair = { old_str: string; new_str: string };
+
+function editFile(relPath: string, edits: EditPair[]): string {
   assertWritable(relPath);
+  if (edits.length === 0) throw new Error("No edits provided.");
   const exists = fs.existsSync(relPath);
 
   if (!exists) {
-    if (oldStr !== "") {
+    if (edits.length > 1 || edits[0].old_str !== "") {
       throw new Error(`File not found: ${relPath}`);
     }
     fs.mkdirSync(path.dirname(relPath), { recursive: true });
-    fs.writeFileSync(relPath, newStr, "utf8");
+    fs.writeFileSync(relPath, edits[0].new_str, "utf8");
     return `Created ${relPath}`;
   }
 
@@ -258,31 +277,58 @@ function editFile(relPath: string, oldStr: string, newStr: string): string {
   const body = hasBOM ? raw.slice(1) : raw;
   const eol = body.includes("\r\n") ? "\r\n" : "\n";
   const content = toLF(body);
-  oldStr = toLF(oldStr);
-  newStr = toLF(newStr);
 
-  if (oldStr === "") {
-    throw new Error(
-      `File ${relPath} already exists; provide a non-empty old_str to edit it.`,
-    );
+  // Locate every edit against the *original* content so later edits can't
+  // accidentally match text an earlier edit inserted. Validate up front; if
+  // any edit fails, nothing is written.
+  const located = edits.map((e, i) => {
+    const oldStr = toLF(e.old_str);
+    const newStr = toLF(e.new_str);
+    const n = i + 1;
+    if (oldStr === "") {
+      throw new Error(
+        `edit ${n}: file ${relPath} already exists; provide a non-empty old_str to edit it.`,
+      );
+    }
+    const occurrences = content.split(oldStr).length - 1;
+    if (occurrences === 0) {
+      throw new Error(`edit ${n}: old_str not found in ${relPath}`);
+    }
+    if (occurrences > 1) {
+      throw new Error(
+        `edit ${n}: old_str matched ${occurrences} times in ${relPath}; provide a more specific string.`,
+      );
+    }
+    const start = content.indexOf(oldStr);
+    return { start, end: start + oldStr.length, oldStr, newStr, n };
+  });
+
+  located.sort((a, b) => a.start - b.start);
+  for (let i = 1; i < located.length; i++) {
+    if (located[i].start < located[i - 1].end) {
+      throw new Error(
+        `edits ${located[i - 1].n} and ${located[i].n} overlap in ${relPath}; split them or widen the old_str of one.`,
+      );
+    }
   }
 
-  const occurrences = content.split(oldStr).length - 1;
-  if (occurrences === 0) {
-    throw new Error(`old_str not found in ${relPath}`);
-  }
-  if (occurrences > 1) {
-    throw new Error(
-      `old_str matched ${occurrences} times in ${relPath}; provide a more specific string.`,
-    );
+  let edited = content;
+  for (let i = located.length - 1; i >= 0; i--) {
+    const { start, end, newStr } = located[i];
+    edited = edited.slice(0, start) + newStr + edited.slice(end);
   }
 
-  const edited = content.replace(oldStr, () => newStr);
   const out =
     (hasBOM ? "\ufeff" : "") +
     (eol === "\r\n" ? edited.replace(/\n/g, "\r\n") : edited);
   fs.writeFileSync(relPath, out, "utf8");
-  return `Edited ${relPath}\n${renderDiff(content, oldStr, newStr)}`;
+
+  const diffs = located
+    .map((l) => renderDiff(content, l.oldStr, l.newStr))
+    .join("\n  \u22ee\n");
+  const header =
+    edits.length === 1 ? `Edited ${relPath}` : `Edited ${relPath} (${edits.length} edits)`;
+  return `${header}\n${diffs}`;
 }
 
 function renderDiff(content: string, oldStr: string, newStr: string): string {
