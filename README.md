@@ -26,7 +26,10 @@ sprite                    # interactive
 sprite -c                 # continue the last session in this directory
 sprite -p "run the tests" # one-shot: print and exit (scriptable; stderr shows tool activity)
 sprite --trust            # skip bash confirmations
+sprite --model <id>       # pick the model (default: claude-haiku-4-5)
 ```
+
+`--model` only takes Claude models — see the [model overview](https://platform.claude.com/docs/en/about-claude/models/overview) for valid API strings. You can also set `SPRITE_MODEL` in your environment.
 
 First launch will ask for an Anthropic API key. It's saved to `~/.config/sprite/config.json` (or set `ANTHROPIC_API_KEY` to skip the prompt).
 
