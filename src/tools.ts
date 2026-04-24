@@ -1,5 +1,7 @@
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
+import { randomUUID } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import type Anthropic from "@anthropic-ai/sdk";
 import { configDir } from "./config.js";
@@ -131,6 +133,29 @@ function cap(s: string): string {
   return `${s.slice(0, half)}\n\n[... ${omitted} bytes truncated by sprite ...]\n\n${s.slice(-half)}`;
 }
 
+/**
+ * For bash output the end is what matters (errors, test summaries), so keep
+ * the tail. The full output is spilled to a temp file so the model can grep
+ * or `sed -n` it if the truncated part turns out to matter.
+ */
+function capTail(s: string): string {
+  if (s.length <= MAX_OUTPUT) return s;
+  const spill = path.join(
+    os.tmpdir(),
+    `sprite-bash-${randomUUID().slice(0, 8)}.log`,
+  );
+  fs.writeFileSync(spill, s, "utf8");
+  // Start the tail at a line boundary so the first visible line isn't torn.
+  let cut = s.length - MAX_OUTPUT;
+  const nl = s.indexOf("\n", cut);
+  if (nl !== -1 && nl < s.length - 1) cut = nl + 1;
+  const omitted = cut;
+  return (
+    `[${omitted} bytes truncated; showing the tail. Full output: ${spill}]\n` +
+    s.slice(cut)
+  );
+}
+
 export type BashApproval = "yes" | "always" | "no";
 
 export type ToolContext = {
@@ -169,7 +194,7 @@ export async function executeTool(
         String(input.new_str),
       );
     case "bash":
-      return cap(await runBash(String(input.command), ctx));
+      return capTail(await runBash(String(input.command), ctx));
     default:
       throw new Error(`Unknown tool: ${name}`);
   }
