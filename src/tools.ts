@@ -41,13 +41,23 @@ export const tools: Anthropic.Tool[] = [
   {
     name: "read_file",
     description:
-      "Read the contents of a file at the given relative path. Use this to inspect existing code or configuration before making changes.",
+      "Read a file at the given relative path. Returns up to 2000 lines; for larger files pass offset/limit to page through it. Use this to inspect existing code or configuration before making changes.",
     input_schema: {
       type: "object",
       properties: {
         path: {
           type: "string",
           description: "Relative path to the file to read.",
+        },
+        offset: {
+          type: "number",
+          description:
+            "1-based line number to start reading from. Defaults to 1.",
+        },
+        limit: {
+          type: "number",
+          description:
+            "Maximum number of lines to return. Defaults to 2000.",
         },
       },
       required: ["path"],
@@ -143,7 +153,13 @@ export async function executeTool(
 ): Promise<string> {
   switch (name) {
     case "read_file":
-      return cap(readFile(String(input.path)));
+      return cap(
+        readFile(
+          String(input.path),
+          input.offset == null ? undefined : Number(input.offset),
+          input.limit == null ? undefined : Number(input.limit),
+        ),
+      );
     case "list_files":
       return cap(listFiles(input.path ? String(input.path) : "."));
     case "edit_file":
@@ -172,8 +188,20 @@ async function runBash(command: string, ctx: ToolContext): Promise<string> {
   return bash(command);
 }
 
-function readFile(relPath: string): string {
-  return fs.readFileSync(relPath, "utf8");
+function readFile(relPath: string, offset = 1, limit = 2000): string {
+  const content = fs.readFileSync(relPath, "utf8");
+  const lines = content.split("\n");
+  const total = lines.length;
+  const start = Math.max(1, offset);
+  const end = Math.min(total, start + limit - 1);
+  if (start === 1 && end >= total) return content;
+  if (start > total) {
+    return `[File has ${total} lines; offset ${offset} is past the end.]`;
+  }
+  const slice = lines.slice(start - 1, end).join("\n");
+  const more =
+    end < total ? ` Use offset=${end + 1} to continue.` : "";
+  return `[Lines ${start}-${end} of ${total}.${more}]\n${slice}`;
 }
 
 function listFiles(relPath: string): string {
