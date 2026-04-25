@@ -134,6 +134,21 @@ export const tools: Anthropic.Tool[] = [
       required: ["command"],
     },
   },
+  {
+    name: "fetch_url",
+    description:
+      "Fetch a URL and return its text content. Use for reading public docs, blog posts, READMEs, raw source files, API responses — anywhere the user pastes a link or you need external context. HTML is stripped to plain text (scripts and styles removed); JSON and text/* pass through as-is. Follows redirects, times out after 15s, caps output at 50KB. Not for authenticated pages or JavaScript-heavy SPAs — those return near-empty content.",
+    input_schema: {
+      type: "object",
+      properties: {
+        url: {
+          type: "string",
+          description: "The URL to fetch. Must start with http:// or https://.",
+        },
+      },
+      required: ["url"],
+    },
+  },
 ];
 
 type ToolInput = Record<string, unknown>;
@@ -212,6 +227,8 @@ export async function executeTool(
     }
     case "bash":
       return capTail(await runBash(String(input.command), ctx, signal));
+    case "fetch_url":
+      return capTail(await fetchUrl(String(input.url), signal));
     default:
       throw new Error(`Unknown tool: ${name}`);
   }
@@ -361,6 +378,84 @@ function renderDiff(content: string, oldStr: string, newStr: string): string {
   for (const l of newLines) out.push(`+ ${num(nln++)} │ ${l}`);
   for (const l of ctxAfter) out.push(`  ${num(nln++)} │ ${l}`);
   return out.join("\n");
+}
+
+/**
+ * Fetch a URL and return its text. HTML bodies are stripped to plain text so
+ * the model isn't paying tokens for `<div class="wrapper">` soup. Not a
+ * browser — JS never runs, so SPAs come back mostly empty. Follows redirects
+ * (fetch's default) and respects the outer AbortSignal so Esc cancels it
+ * like any other tool call.
+ */
+const FETCH_MAX_BYTES = 5 * 1024 * 1024;
+const FETCH_TIMEOUT_MS = 15_000;
+
+async function fetchUrl(url: string, signal?: AbortSignal): Promise<string> {
+  if (!/^https?:\/\//i.test(url)) {
+    throw new Error(
+      `fetch_url: URL must start with http:// or https:// (got: ${url})`,
+    );
+  }
+
+  // One controller combines the caller's abort with our timeout, so the
+  // underlying fetch sees a single signal.
+  const combined = new AbortController();
+  const timer = setTimeout(
+    () => combined.abort(new Error(`timeout after ${FETCH_TIMEOUT_MS / 1000}s`)),
+    FETCH_TIMEOUT_MS,
+  );
+  const onOuterAbort = () => combined.abort(signal?.reason);
+  signal?.addEventListener("abort", onOuterAbort, { once: true });
+
+  try {
+    const res = await fetch(url, {
+      signal: combined.signal,
+      redirect: "follow",
+      headers: { "user-agent": "sprite/0.1 (+https://github.com/anthropics)" },
+    });
+
+    const len = parseInt(res.headers.get("content-length") || "0", 10);
+    if (len > FETCH_MAX_BYTES) {
+      return `[${res.status} ${res.statusText} · ${res.url}]\n[refused: content-length ${len} exceeds ${FETCH_MAX_BYTES} byte cap]`;
+    }
+
+    const ct = res.headers.get("content-type") || "";
+    const body = await res.text();
+    const looksHtml = /\bhtml\b/i.test(ct) || /^\s*<(!doctype|html|head|body)/i.test(body);
+    const text = looksHtml ? htmlToText(body) : body;
+
+    const redirect = res.url !== url ? ` → ${res.url}` : "";
+    return `[${res.status} ${res.statusText} · ${url}${redirect}]\n${text}`;
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener("abort", onOuterAbort);
+  }
+}
+
+/**
+ * Crude HTML → text: good enough for docs, READMEs, blog posts. Drops
+ * scripts/styles/comments, turns block-level close tags into newlines, strips
+ * the rest, decodes the common entities. Not a real parser — tables and
+ * heavily nested layouts will come out lumpy.
+ */
+function htmlToText(html: string): string {
+  return html
+    .replace(/<head[\s\S]*?<\/head>/gi, "")
+    .replace(/<script[\s\S]*?<\/script>/gi, "")
+    .replace(/<style[\s\S]*?<\/style>/gi, "")
+    .replace(/<!--[\s\S]*?-->/g, "")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/(p|div|section|article|li|h[1-6]|tr|pre|blockquote)>/gi, "\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }
 
 /**

@@ -439,6 +439,7 @@ function summarizeInput(name: string, input: unknown): string {
     return String(o?.path ?? "");
   if (name === "edit_file") return String(o?.path ?? "");
   if (name === "bash") return String(o?.command ?? "");
+  if (name === "fetch_url") return String(o?.url ?? "");
   return JSON.stringify(input);
 }
 

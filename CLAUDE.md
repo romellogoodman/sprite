@@ -38,7 +38,7 @@ See README.md for user-facing flags and commands.
 
 ## Tools
 
-Current set: `read_file`, `list_files`, `edit_file`, `bash`. Keep the set small — additions need a real reason, not just convenience. Most new capabilities should go through `bash` or a script the model writes. Evaluate proposals on their merits; don't refuse reflexively.
+Current set: `read_file`, `list_files`, `edit_file`, `bash`, `fetch_url`. Keep the set small — additions need a real reason, not just convenience. Most new capabilities should go through `bash` or a script the model writes. Evaluate proposals on their merits; don't refuse reflexively.
 
 ## Permissions
 
