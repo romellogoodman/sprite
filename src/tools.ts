@@ -53,7 +53,16 @@ export type PlanDecision =
   | { approved: true }
   | { approved: false; feedback: string };
 
-export const tools: Anthropic.Tool[] = [
+/**
+ * Tool list filtered to the current permission mode. exit_plan_mode is only
+ * visible in plan mode so the model can't call it from default mode.
+ */
+export function toolsForMode(mode: PermissionMode): Anthropic.Tool[] {
+  if (mode === "plan") return ALL_TOOLS;
+  return ALL_TOOLS.filter((t) => t.name !== "exit_plan_mode");
+}
+
+const ALL_TOOLS: Anthropic.Tool[] = [
   {
     name: "read_file",
     description:

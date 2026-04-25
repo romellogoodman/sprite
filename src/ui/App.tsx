@@ -147,11 +147,10 @@ export function App({
       setMode(modeRef.current === "default" ? "plan" : "default");
       return;
     }
-    // Esc on an empty prompt cancels the turn. With text in the prompt,
-    // PromptInput's own Esc handler clears it first — so it's esc-esc to
-    // cancel while typing a follow-up. Picker's own useInput owns Esc
-    // while it's open.
-    if (key.escape && busy && input === "" && !modelPickerOpen) {
+    // Esc during a turn always aborts. PromptInput's own esc handler also
+    // runs, so any draft text is cleared at the same time. Picker's useInput
+    // owns esc while it's open.
+    if (key.escape && busy && !modelPickerOpen) {
       abortRef.current?.abort();
       setQueued(null);
       // If we were waiting on a confirmation, let the promise resolve so
