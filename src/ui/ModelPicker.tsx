@@ -8,13 +8,6 @@ type Props = {
   onCancel: () => void;
 };
 
-const LABEL_WIDTH = 14;
-
-/**
- * Arrow-key picker. Owns its own selection state and input handling so App
- * doesn't have to juggle per-key handlers. Highlights the current model
- * with a checkmark, the hovered row with a caret.
- */
 export function ModelPicker({ current, onConfirm, onCancel }: Props) {
   const initial = Math.max(
     0,
@@ -37,43 +30,23 @@ export function ModelPicker({ current, onConfirm, onCancel }: Props) {
       paddingX={1}
     >
       <Text bold>Select model</Text>
-      <Text dimColor>Switch for this session — history stays.</Text>
 
       <Box flexDirection="column" marginTop={1}>
         {MODELS.map((m, i) => {
           const isCurrent = m.id === current;
           const isHover = i === selected;
-          const ctx =
-            m.contextWindow >= 1_000_000
-              ? "1M context"
-              : `${Math.round(m.contextWindow / 1000)}K context`;
-          const price = `$${m.priceIn}/$${m.priceOut} per Mtok`;
-          const tail = `${m.description} · ${ctx} · ${price}`;
-
           return (
-            <Box key={m.id} flexDirection="row">
-              <Box width={2}>
-                <Text color="cyan">{isHover ? "›" : " "}</Text>
-              </Box>
-              <Box width={LABEL_WIDTH}>
-                <Text
-                  color={isHover ? "cyan" : undefined}
-                  bold={isHover || isCurrent}
-                >
-                  {m.label}
-                  {isCurrent ? " ✓" : ""}
-                </Text>
-              </Box>
-              <Box flexGrow={1}>
-                <Text dimColor={!isHover}>{tail}</Text>
-              </Box>
-            </Box>
+            <Text key={m.id} color={isHover ? "cyan" : undefined}>
+              {isHover ? "› " : "  "}
+              <Text bold={isHover || isCurrent}>{m.label}</Text>
+              {isCurrent ? " ✓" : ""}
+            </Text>
           );
         })}
       </Box>
 
       <Box marginTop={1}>
-        <Text dimColor>↑↓ to move · enter to confirm · esc to cancel</Text>
+        <Text dimColor>↑↓ · enter · esc</Text>
       </Box>
     </Box>
   );
