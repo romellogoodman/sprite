@@ -26,12 +26,25 @@ export async function runPrint(prompt: string, trust: boolean): Promise<void> {
     isAllowed: isBashAllowed,
     allowPrefix: allowBashPrefix,
     suggestPrefix: suggestBashPrefix,
+    // Headless mode runs in 'default'; no TTY to cycle from.
+    getMode: () => "default",
+    setMode: () => {},
     confirmBash: async (command) => {
       process.stderr.write(
         `✗ bash denied (non-interactive): ${command}\n  Re-run with --trust or allowlist the command interactively.\n`,
       );
       return "no";
     },
+    askQuestion: async () => {
+      process.stderr.write(
+        "✗ ask_user_question unavailable in non-interactive mode (-p).\n",
+      );
+      return [];
+    },
+    approvePlan: async () => ({
+      approved: false,
+      feedback: "non-interactive mode; plan approval unavailable",
+    }),
   };
 
   const controller = new AbortController();

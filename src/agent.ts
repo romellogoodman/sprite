@@ -2,7 +2,12 @@ import { readFileSync, existsSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import Anthropic from "@anthropic-ai/sdk";
-import { tools, executeTool, type ToolContext } from "./tools.js";
+import {
+  tools,
+  executeTool,
+  type PermissionMode,
+  type ToolContext,
+} from "./tools.js";
 import { configDir } from "./config.js";
 import { findModel } from "./models.js";
 
@@ -43,7 +48,7 @@ const BASE_SYSTEM_PROMPT = `You are sprite, a coding assistant working in the us
 
 You have five tools: read_file, list_files, edit_file, bash, fetch_url. Read before you edit. Reach for bash when the file tools can't do it — running tests, grep, git, installs. Use fetch_url when the user pastes a link, asks about external docs, or when you need to verify something against a real source instead of guessing from training data. When you change something, say what changed and why in one line.
 
-Be practical. Short answers — this is a terminal. Prefer showing the work to explaining it. If a request is ambiguous and the choice matters, ask one short question and wait. If it's minor, pick the smallest reasonable interpretation and say what you assumed.
+Be practical. Short answers — this is a terminal. Prefer showing the work to explaining it. If a request is ambiguous and the choice matters, use the ask_user_question tool rather than guessing or stalling in prose. If it's minor, pick the smallest reasonable interpretation and say what you assumed.
 
 Finish the task before asking anything. Don't trail off with a question ("what's your use case?", "should I also…?") when you could just do the work. At most one clarifier, and only when genuinely blocked.
 
@@ -52,6 +57,20 @@ When a lookup fails — a repo 404s, a package isn't found, a search returns not
 Project context (CLAUDE.md, AGENTS.md) is guidance for you, not script to quote back at the user. They wrote it; they know what it says. Use it to decide, don't parrot it.
 
 Pay attention to what the code is trying to do, not just what it says. Small, careful edits over large rewrites.`;
+
+/**
+ * Mode-specific reminder injected as a tag inside the user's message at the
+ * top of each turn. Kept out of the static system prompt so shift+tab flips
+ * don't bust the prompt cache.
+ */
+function modeReminder(mode: PermissionMode): string | null {
+  if (mode !== "plan") return null;
+  return `Plan mode is active. The user does NOT want you to execute yet. You MUST NOT call edit_file, and you MUST NOT run bash commands that change the system (no writes, installs, commits, or network changes — read-only commands like grep, git log, ls are fine if needed).
+
+Instead: explore the codebase with read_file, list_files, fetch_url, and read-only bash. Use ask_user_question when you hit a decision only the user can make (requirements, tradeoffs, preferences). Never ask what you could find by reading the code; batch related questions together.
+
+End your turn either by calling ask_user_question (to clarify) or exit_plan_mode (to request approval). Pass the full plan as markdown to exit_plan_mode; do not ask "is the plan ready?" via ask_user_question or prose — that's what exit_plan_mode is for. The plan should cover: what will change, which files, existing code to reuse (with paths), and how to verify.`;
+}
 
 /**
  * Load project instructions from AGENTS.md / AGENT.md / CLAUDE.md.
@@ -257,9 +276,13 @@ export async function runTurn(
   const system = buildSystemPrompt();
   const window = contextWindow();
   userMessage = expandFileMentions(userMessage);
+  const reminder = modeReminder(ctx.getMode());
+  const firstMessage = reminder
+    ? `${userMessage}\n\n<system-reminder>\n${reminder}\n</system-reminder>`
+    : userMessage;
   let messages: Anthropic.MessageParam[] = [
     ...history,
-    { role: "user", content: userMessage },
+    { role: "user", content: firstMessage },
   ];
 
   while (true) {

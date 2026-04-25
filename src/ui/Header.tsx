@@ -1,7 +1,14 @@
 import { Box, Text } from "ink";
 import { model, contextWindow } from "../agent.js";
+import type { PermissionMode } from "../tools.js";
 
-export function Header({ contextUsed }: { contextUsed: number }) {
+export function Header({
+  contextUsed,
+  mode,
+}: {
+  contextUsed: number;
+  mode: PermissionMode;
+}) {
   const cwd = process.cwd();
   const home = process.env.HOME ?? "";
   const pretty =
@@ -24,6 +31,7 @@ export function Header({ contextUsed }: { contextUsed: number }) {
       </Text>
       <Text dimColor>
         cwd: {pretty} · {model()}
+        {mode === "plan" && <Text color="magenta"> · plan mode</Text>}
         {contextUsed > 0 && (
           <Text color={pct >= 75 ? "yellow" : undefined}> · {pct}% context</Text>
         )}
@@ -32,7 +40,7 @@ export function Header({ contextUsed }: { contextUsed: number }) {
         <Text dimColor>
           <Text color="cyan">!</Text> shell <Text color="cyan">@</Text> file{" "}
           <Text color="cyan">/</Text> commands <Text color="cyan">↑↓</Text>{" "}
-          history
+          history <Text color="cyan">shift+tab</Text> plan mode
         </Text>
       </Box>
     </Box>

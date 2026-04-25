@@ -5,7 +5,15 @@ import type Anthropic from "@anthropic-ai/sdk";
 import { runTurn, compactHistory, model, type AgentEvent } from "../agent.js";
 import { resolveCommand, listCommands } from "../commands.js";
 import { MODELS } from "../models.js";
-import { bash, type BashApproval, type ToolContext } from "../tools.js";
+import {
+  bash,
+  type BashApproval,
+  type PermissionMode,
+  type PlanDecision,
+  type Question,
+  type QuestionAnswer,
+  type ToolContext,
+} from "../tools.js";
 import { startSession, loadLastSession, type Session } from "../session.js";
 import { poem } from "../poem.js";
 import {
@@ -22,10 +30,20 @@ import { Line, type DisplayLine } from "./Line.js";
 import { BashConfirm } from "./BashConfirm.js";
 import { ModelPicker } from "./ModelPicker.js";
 import { Login } from "./Login.js";
+import { QuestionPrompt } from "./QuestionPrompt.js";
+import { PlanApproval } from "./PlanApproval.js";
 
 type PendingBash = {
   command: string;
   resolve: (a: BashApproval) => void;
+};
+type PendingQuestion = {
+  questions: Question[];
+  resolve: (a: QuestionAnswer[]) => void;
+};
+type PendingPlan = {
+  plan: string;
+  resolve: (d: PlanDecision) => void;
 };
 
 export function App({
@@ -74,6 +92,15 @@ export function App({
   const [bashMode, setBashMode] = useState(false);
   const [verbose, setVerbose] = useState(false);
   const [pendingBash, setPendingBash] = useState<PendingBash | null>(null);
+  const [pendingQuestion, setPendingQuestion] =
+    useState<PendingQuestion | null>(null);
+  const [pendingPlan, setPendingPlan] = useState<PendingPlan | null>(null);
+  const [mode, setModeState] = useState<PermissionMode>("default");
+  const modeRef = useRef<PermissionMode>("default");
+  const setMode = (m: PermissionMode) => {
+    modeRef.current = m;
+    setModeState(m);
+  };
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
   // Re-render when the model changes so the header reflects it (model() reads
   // the env var, which React doesn't track on its own).
@@ -95,14 +122,31 @@ export function App({
     isAllowed: isBashAllowed,
     allowPrefix: allowBashPrefix,
     suggestPrefix: suggestBashPrefix,
+    getMode: () => modeRef.current,
+    setMode,
     confirmBash: (command) =>
       new Promise<BashApproval>((resolve) => {
         setPendingBash({ command, resolve });
+      }),
+    askQuestion: (questions) =>
+      new Promise<QuestionAnswer[]>((resolve) => {
+        setPendingQuestion({ questions, resolve });
+      }),
+    approvePlan: (plan) =>
+      new Promise<PlanDecision>((resolve) => {
+        setPendingPlan({ plan, resolve });
       }),
   }).current;
 
   useInput((ch, key) => {
     if (key.ctrl && ch === "o") setVerbose((v) => !v);
+    // Shift+Tab cycles permission modes: default ↔ plan. Only while idle —
+    // mid-turn mode flips still work at the tool layer (getMode() is live),
+    // but the UX is confusing so we don't expose it here.
+    if (key.shift && key.tab && !busy && !modelPickerOpen) {
+      setMode(modeRef.current === "default" ? "plan" : "default");
+      return;
+    }
     // Esc on an empty prompt cancels the turn. With text in the prompt,
     // PromptInput's own Esc handler clears it first — so it's esc-esc to
     // cancel while typing a follow-up. Picker's own useInput owns Esc
@@ -110,12 +154,22 @@ export function App({
     if (key.escape && busy && input === "" && !modelPickerOpen) {
       abortRef.current?.abort();
       setQueued(null);
-      // If we were waiting on a bash confirmation, let it go so the
-      // confirmBash promise resolves and the turn can unwind.
+      // If we were waiting on a confirmation, let the promise resolve so
+      // the turn can unwind cleanly.
       if (pendingBash) {
         const { resolve } = pendingBash;
         setPendingBash(null);
         resolve("no");
+      }
+      if (pendingQuestion) {
+        const { resolve } = pendingQuestion;
+        setPendingQuestion(null);
+        resolve([]);
+      }
+      if (pendingPlan) {
+        const { resolve } = pendingPlan;
+        setPendingPlan(null);
+        resolve({ approved: false, feedback: "user cancelled" });
       }
     }
   });
@@ -408,7 +462,7 @@ export function App({
 
   return (
     <Box flexDirection="column">
-      <Header contextUsed={contextUsed} />
+      <Header contextUsed={contextUsed} mode={mode} />
 
       <Box flexDirection="column" marginBottom={1}>
         {lines.map((line, i) => (
@@ -418,6 +472,29 @@ export function App({
 
       {pendingBash ? (
         <BashConfirm command={pendingBash.command} />
+      ) : pendingQuestion ? (
+        <QuestionPrompt
+          questions={pendingQuestion.questions}
+          onComplete={(answers) => {
+            const { resolve } = pendingQuestion;
+            setPendingQuestion(null);
+            resolve(answers);
+          }}
+          onCancel={() => {
+            const { resolve } = pendingQuestion;
+            setPendingQuestion(null);
+            resolve([]);
+          }}
+        />
+      ) : pendingPlan ? (
+        <PlanApproval
+          plan={pendingPlan.plan}
+          onDecision={(d) => {
+            const { resolve } = pendingPlan;
+            setPendingPlan(null);
+            resolve(d);
+          }}
+        />
       ) : modelPickerOpen ? (
         <ModelPicker
           current={model()}
@@ -452,6 +529,8 @@ export function App({
             prefix={
               bashMode ? (
                 <Text color="yellow">! </Text>
+              ) : mode === "plan" ? (
+                <Text color="magenta">plan ❯ </Text>
               ) : (
                 <Text color={busy ? "gray" : "cyan"}>❯ </Text>
               )

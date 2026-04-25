@@ -39,6 +39,20 @@ function assertWritable(relPath: string): string {
   return abs;
 }
 
+export type PermissionMode = "default" | "plan";
+
+export type QuestionOption = { label: string; description: string };
+export type Question = {
+  question: string;
+  header: string;
+  options: QuestionOption[];
+  multiSelect?: boolean;
+};
+export type QuestionAnswer = { question: string; answer: string };
+export type PlanDecision =
+  | { approved: true }
+  | { approved: false; feedback: string };
+
 export const tools: Anthropic.Tool[] = [
   {
     name: "read_file",
@@ -149,6 +163,82 @@ export const tools: Anthropic.Tool[] = [
       required: ["url"],
     },
   },
+  {
+    name: "ask_user_question",
+    description:
+      "Ask the user multiple-choice questions when you need information only they can provide: requirements, preferences, tradeoffs, or a decision between approaches that look equally valid from the code. Prefer this over guessing when the choice actually matters. Don't use it for things you could find by reading files, and don't use it to ask 'should I proceed?' — just do the work. Each question has 2-4 options; the UI always adds an 'Other' option that lets the user type a freeform answer.",
+    input_schema: {
+      type: "object",
+      properties: {
+        questions: {
+          type: "array",
+          minItems: 1,
+          maxItems: 4,
+          description:
+            "1-4 questions to ask at once. Batch related questions together.",
+          items: {
+            type: "object",
+            properties: {
+              question: {
+                type: "string",
+                description:
+                  "The full question. Should be specific and end with '?'.",
+              },
+              header: {
+                type: "string",
+                description:
+                  "Short label (≤12 chars) shown as a chip, e.g. 'Auth method', 'Library'.",
+              },
+              options: {
+                type: "array",
+                minItems: 2,
+                maxItems: 4,
+                items: {
+                  type: "object",
+                  properties: {
+                    label: {
+                      type: "string",
+                      description:
+                        "1-5 word choice label. If recommending one, put it first and append ' (Recommended)'.",
+                    },
+                    description: {
+                      type: "string",
+                      description:
+                        "One sentence on what this option means or implies.",
+                    },
+                  },
+                  required: ["label", "description"],
+                },
+              },
+              multiSelect: {
+                type: "boolean",
+                description:
+                  "Allow the user to pick more than one option (use when choices are not mutually exclusive).",
+              },
+            },
+            required: ["question", "header", "options"],
+          },
+        },
+      },
+      required: ["questions"],
+    },
+  },
+  {
+    name: "exit_plan_mode",
+    description:
+      "Call this when you are in plan mode and the plan is ready for user approval. Pass the full plan as markdown in the `plan` argument; the user will see it and approve or reject. On approval, plan mode ends and you can make edits. On rejection, you stay in plan mode and the user's feedback comes back as the tool result. Do NOT use ask_user_question to ask 'is the plan ready?' — that's exactly what this tool is for. Only available in plan mode.",
+    input_schema: {
+      type: "object",
+      properties: {
+        plan: {
+          type: "string",
+          description:
+            "The full plan as markdown. Include: what will change, which files, existing code to reuse (with paths), and how to verify.",
+        },
+      },
+      required: ["plan"],
+    },
+  },
 ];
 
 type ToolInput = Record<string, unknown>;
@@ -190,8 +280,16 @@ export type BashApproval = "yes" | "always" | "no";
 export type ToolContext = {
   /** Skip all confirmations (--trust). */
   trust: boolean;
+  /** Live permission mode (read on each tool call so shift+tab mid-turn works). */
+  getMode: () => PermissionMode;
+  /** Flip mode from tool side (used by exit_plan_mode on approval). */
+  setMode: (m: PermissionMode) => void;
   /** Ask the user to approve a bash command. Returns their choice. */
   confirmBash: (command: string) => Promise<BashApproval>;
+  /** Show multiple-choice questions and resolve with the answers. */
+  askQuestion: (questions: Question[]) => Promise<QuestionAnswer[]>;
+  /** Show a plan and resolve with approval or rejection feedback. */
+  approvePlan: (plan: string) => Promise<PlanDecision>;
   /** Persist a prefix to the project allowlist. */
   allowPrefix: (prefix: string) => void;
   /** Check the project allowlist. */
@@ -218,6 +316,9 @@ export async function executeTool(
     case "list_files":
       return cap(listFiles(input.path ? String(input.path) : "."));
     case "edit_file": {
+      if (ctx.getMode() === "plan") {
+        return "Refused: plan mode is active — no edits allowed. Finish the plan and call exit_plan_mode to request approval.";
+      }
       const edits = Array.isArray(input.edits)
         ? (input.edits as Array<{ old_str: unknown; new_str: unknown }>).map(
             (e) => ({ old_str: String(e.old_str), new_str: String(e.new_str) }),
@@ -229,9 +330,36 @@ export async function executeTool(
       return capTail(await runBash(String(input.command), ctx, signal));
     case "fetch_url":
       return capTail(await fetchUrl(String(input.url), signal));
+    case "ask_user_question": {
+      const questions = (input.questions as Question[]) ?? [];
+      if (questions.length === 0) {
+        throw new Error("ask_user_question: questions array is empty.");
+      }
+      const answers = await ctx.askQuestion(questions);
+      return formatAnswers(answers);
+    }
+    case "exit_plan_mode": {
+      if (ctx.getMode() !== "plan") {
+        return "Refused: exit_plan_mode can only be called while plan mode is active.";
+      }
+      const plan = String(input.plan ?? "").trim();
+      if (!plan) throw new Error("exit_plan_mode: plan is required.");
+      const decision = await ctx.approvePlan(plan);
+      if (decision.approved) {
+        ctx.setMode("default");
+        return "Plan approved. Plan mode is now off; proceed with the implementation.";
+      }
+      return `Plan rejected. User feedback: ${decision.feedback || "(none)"}. You are still in plan mode — adjust the plan and call exit_plan_mode again when ready.`;
+    }
     default:
       throw new Error(`Unknown tool: ${name}`);
   }
+}
+
+function formatAnswers(answers: QuestionAnswer[]): string {
+  if (answers.length === 0) return "User declined to answer.";
+  const lines = answers.map((a) => `- "${a.question}" → ${a.answer}`);
+  return `User answered:\n${lines.join("\n")}`;
 }
 
 async function runBash(
