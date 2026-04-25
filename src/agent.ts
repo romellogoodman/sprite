@@ -4,6 +4,7 @@ import path from "node:path";
 import Anthropic from "@anthropic-ai/sdk";
 import { tools, executeTool, type ToolContext } from "./tools.js";
 import { configDir } from "./config.js";
+import { findModel } from "./models.js";
 
 const DEFAULT_MODEL = "claude-haiku-4-5";
 
@@ -31,16 +32,11 @@ function modelParams(): Partial<Anthropic.MessageCreateParams> {
   return {};
 }
 
-// Approximate context windows for the % indicator. Unknown models fall back
-// to 200K so auto-compact errs toward triggering early rather than late.
-const CONTEXT_WINDOWS: Record<string, number> = {
-  "claude-opus-4-7": 1_000_000,
-  "claude-opus-4-6": 1_000_000,
-  "claude-sonnet-4-6": 1_000_000,
-  "claude-haiku-4-5": 200_000,
-};
+// Approximate context windows for the % indicator, pulled from the shared
+// catalog. Unknown models fall back to 200K so auto-compact errs toward
+// triggering early rather than late.
 export function contextWindow(): number {
-  return CONTEXT_WINDOWS[model()] ?? 200_000;
+  return findModel(model())?.contextWindow ?? 200_000;
 }
 
 const BASE_SYSTEM_PROMPT = `You are sprite, a coding assistant working in the user's current directory.

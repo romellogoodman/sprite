@@ -43,6 +43,7 @@ First launch will ask for an Anthropic API key. It's saved to `~/.config/sprite/
 - Multi-line pastes collapse to `[Pasted #1 N lines]` and expand on submit
 - `/clear` — reset the conversation
 - `/compact` — summarize the conversation so far and keep going with just the summary in context
+- `/model` — pick a model for the rest of the session (or `/model <id>` to switch directly)
 - `/logout` — forget the saved API key
 - `exit` — quit
 

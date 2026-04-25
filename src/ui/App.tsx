@@ -2,8 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import { Box, Text, useApp, useInput } from "ink";
 import Spinner from "ink-spinner";
 import type Anthropic from "@anthropic-ai/sdk";
-import { runTurn, compactHistory, type AgentEvent } from "../agent.js";
+import { runTurn, compactHistory, model, type AgentEvent } from "../agent.js";
 import { resolveCommand, listCommands } from "../commands.js";
+import { MODELS } from "../models.js";
 import { bash, type BashApproval, type ToolContext } from "../tools.js";
 import { startSession, loadLastSession, type Session } from "../session.js";
 import { poem } from "../poem.js";
@@ -19,6 +20,7 @@ import { PromptInput } from "./PromptInput.js";
 import { Header } from "./Header.js";
 import { Line, type DisplayLine } from "./Line.js";
 import { BashConfirm } from "./BashConfirm.js";
+import { ModelPicker } from "./ModelPicker.js";
 import { Login } from "./Login.js";
 
 type PendingBash = {
@@ -72,6 +74,10 @@ export function App({
   const [bashMode, setBashMode] = useState(false);
   const [verbose, setVerbose] = useState(false);
   const [pendingBash, setPendingBash] = useState<PendingBash | null>(null);
+  const [modelPickerOpen, setModelPickerOpen] = useState(false);
+  // Re-render when the model changes so the header reflects it (model() reads
+  // the env var, which React doesn't track on its own).
+  const [, setModelTick] = useState(0);
   const [session, setSession] = useState<Session>(() => startSession());
   const abortRef = useRef<AbortController | null>(null);
   const queuedRef = useRef<string | null>(null);
@@ -97,6 +103,12 @@ export function App({
 
   useInput((ch, key) => {
     if (key.ctrl && ch === "o") setVerbose((v) => !v);
+    // Esc closes the model picker if it's open — cheaper than threading
+    // through the picker's own handler, and matches BashConfirm's pattern.
+    if (key.escape && modelPickerOpen) {
+      setModelPickerOpen(false);
+      return;
+    }
     // Esc on an empty prompt cancels the turn. With text in the prompt,
     // PromptInput's own Esc handler clears it first — so it's esc-esc to
     // cancel while typing a follow-up.
@@ -112,6 +124,23 @@ export function App({
       }
     }
   });
+
+  useInput(
+    (ch) => {
+      if (!modelPickerOpen) return;
+      const n = parseInt(ch, 10);
+      if (!Number.isFinite(n) || n < 1 || n > MODELS.length) return;
+      const picked = MODELS[n - 1];
+      process.env.SPRITE_MODEL = picked.id;
+      setModelPickerOpen(false);
+      setModelTick((t) => t + 1);
+      push({
+        kind: "assistant",
+        text: `Model set to ${picked.id}. New turns will use it; history stays.`,
+      });
+    },
+    { isActive: modelPickerOpen },
+  );
 
   useEffect(() => {
     if (!busy) return;
@@ -306,6 +335,33 @@ export function App({
       return;
     }
 
+    if (text === "/model") {
+      setInput("");
+      setModelPickerOpen(true);
+      return;
+    }
+
+    // Allow a direct pick: /model <id> skips the picker UI.
+    if (text.startsWith("/model ")) {
+      setInput("");
+      const id = text.slice(7).trim();
+      const picked = MODELS.find((m) => m.id === id || m.id.endsWith(id));
+      if (!picked) {
+        push({
+          kind: "error",
+          text: `Unknown model "${id}". Run /model to see the list.`,
+        });
+        return;
+      }
+      process.env.SPRITE_MODEL = picked.id;
+      setModelTick((t) => t + 1);
+      push({
+        kind: "assistant",
+        text: `Model set to ${picked.id}. New turns will use it; history stays.`,
+      });
+      return;
+    }
+
     // Custom slash commands: expand /name args to the template body and
     // send that through runTurn, but show the short form in the transcript.
     let message = text;
@@ -374,6 +430,8 @@ export function App({
 
       {pendingBash ? (
         <BashConfirm command={pendingBash.command} />
+      ) : modelPickerOpen ? (
+        <ModelPicker current={model()} />
       ) : (
         <Box flexDirection="column">
           {busy && (

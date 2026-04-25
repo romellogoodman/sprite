@@ -12,7 +12,7 @@ import { configDir } from "./config.js";
  * override a user's global commands in `~/.config/sprite/commands/`.
  */
 
-const BUILTINS = new Set(["clear", "compact", "logout"]);
+const BUILTINS = new Set(["clear", "compact", "logout", "model"]);
 
 function commandDirs(): string[] {
   return [
