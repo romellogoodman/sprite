@@ -141,8 +141,21 @@ export function PromptInput({
       }
 
       // Fallback for terminals without bracketed paste: a multi-char chunk
-      // containing a newline can only be a paste.
+      // containing a newline can only be a paste — with one exception. If
+      // the only newline is at the very end (a user typed fast and hit
+      // Enter in the same stdin chunk, e.g. "/model\r"), treat it as text +
+      // submit, not as a multi-line paste. Real pastes have interior
+      // newlines and will still hit finishPaste.
       if (!key.return && input.length > 1 && /[\r\n]/.test(input)) {
+        const m = input.match(/^([^\r\n]+)[\r\n]+$/);
+        if (m) {
+          const combined = value.slice(0, cursor) + m[1] + value.slice(cursor);
+          setHistoryIdx(null);
+          setDraft("");
+          setPastes([]);
+          onSubmit(expandPastes(combined));
+          return;
+        }
         return finishPaste(input);
       }
 

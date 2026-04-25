@@ -9,6 +9,7 @@ export type Completion = {
 export const SLASH_COMMANDS: Completion[] = [
   { value: "/clear", desc: "reset the conversation" },
   { value: "/compact", desc: "summarize and continue" },
+  { value: "/model", desc: "pick a model for this session" },
   { value: "/logout", desc: "forget the saved API key" },
 ];
 
