@@ -1,20 +1,22 @@
 /**
  * The catalog of Claude models sprite knows about. Mirrors
  * https://platform.claude.com/docs/en/about-claude/models/overview — keep
- * in sync when a new model ships or a retirement date arrives.
+ * in sync when a new model ships. Older generations are intentionally
+ * omitted; pass --model <id> to use one anyway.
  *
  * `id` is the Claude API alias (the short form, not the dated snapshot).
  * Sprite reads/writes this as SPRITE_MODEL; unknown ids still work (the
  * API accepts them) but fall back to a 200K context window.
  */
-export type ModelTier = "current" | "legacy" | "deprecated";
-
 export type ModelInfo = {
   id: string;
   label: string;
   contextWindow: number;
   description: string;
-  tier: ModelTier;
+  /** USD per million input tokens. */
+  priceIn: number;
+  /** USD per million output tokens. */
+  priceOut: number;
 };
 
 export const MODELS: ModelInfo[] = [
@@ -22,64 +24,25 @@ export const MODELS: ModelInfo[] = [
     id: "claude-opus-4-7",
     label: "Opus 4.7",
     contextWindow: 1_000_000,
-    description: "most capable; complex reasoning & agentic coding",
-    tier: "current",
+    description: "Most capable — complex reasoning and agentic coding",
+    priceIn: 5,
+    priceOut: 25,
   },
   {
     id: "claude-sonnet-4-6",
     label: "Sonnet 4.6",
     contextWindow: 1_000_000,
-    description: "best balance of speed and intelligence",
-    tier: "current",
+    description: "Best balance of speed and intelligence",
+    priceIn: 3,
+    priceOut: 15,
   },
   {
     id: "claude-haiku-4-5",
     label: "Haiku 4.5",
     contextWindow: 200_000,
-    description: "fastest with near-frontier intelligence",
-    tier: "current",
-  },
-  {
-    id: "claude-opus-4-6",
-    label: "Opus 4.6",
-    contextWindow: 1_000_000,
-    description: "previous Opus generation",
-    tier: "legacy",
-  },
-  {
-    id: "claude-sonnet-4-5",
-    label: "Sonnet 4.5",
-    contextWindow: 200_000,
-    description: "previous Sonnet generation",
-    tier: "legacy",
-  },
-  {
-    id: "claude-opus-4-5",
-    label: "Opus 4.5",
-    contextWindow: 200_000,
-    description: "earlier Opus 4 generation",
-    tier: "legacy",
-  },
-  {
-    id: "claude-opus-4-1",
-    label: "Opus 4.1",
-    contextWindow: 200_000,
-    description: "earlier Opus 4 generation",
-    tier: "legacy",
-  },
-  {
-    id: "claude-sonnet-4-0",
-    label: "Sonnet 4",
-    contextWindow: 200_000,
-    description: "retires 2026-06-15",
-    tier: "deprecated",
-  },
-  {
-    id: "claude-opus-4-0",
-    label: "Opus 4",
-    contextWindow: 200_000,
-    description: "retires 2026-06-15",
-    tier: "deprecated",
+    description: "Fastest with near-frontier intelligence",
+    priceIn: 1,
+    priceOut: 5,
   },
 ];
 

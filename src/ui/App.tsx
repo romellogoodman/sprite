@@ -103,16 +103,11 @@ export function App({
 
   useInput((ch, key) => {
     if (key.ctrl && ch === "o") setVerbose((v) => !v);
-    // Esc closes the model picker if it's open — cheaper than threading
-    // through the picker's own handler, and matches BashConfirm's pattern.
-    if (key.escape && modelPickerOpen) {
-      setModelPickerOpen(false);
-      return;
-    }
     // Esc on an empty prompt cancels the turn. With text in the prompt,
     // PromptInput's own Esc handler clears it first — so it's esc-esc to
-    // cancel while typing a follow-up.
-    if (key.escape && busy && input === "") {
+    // cancel while typing a follow-up. Picker's own useInput owns Esc
+    // while it's open.
+    if (key.escape && busy && input === "" && !modelPickerOpen) {
       abortRef.current?.abort();
       setQueued(null);
       // If we were waiting on a bash confirmation, let it go so the
@@ -125,22 +120,15 @@ export function App({
     }
   });
 
-  useInput(
-    (ch) => {
-      if (!modelPickerOpen) return;
-      const n = parseInt(ch, 10);
-      if (!Number.isFinite(n) || n < 1 || n > MODELS.length) return;
-      const picked = MODELS[n - 1];
-      process.env.SPRITE_MODEL = picked.id;
-      setModelPickerOpen(false);
-      setModelTick((t) => t + 1);
-      push({
-        kind: "assistant",
-        text: `Model set to ${picked.id}. New turns will use it; history stays.`,
-      });
-    },
-    { isActive: modelPickerOpen },
-  );
+  const pickModel = (id: string) => {
+    process.env.SPRITE_MODEL = id;
+    setModelPickerOpen(false);
+    setModelTick((t) => t + 1);
+    push({
+      kind: "assistant",
+      text: `Model set to ${id}. New turns will use it; history stays.`,
+    });
+  };
 
   useEffect(() => {
     if (!busy) return;
@@ -431,7 +419,11 @@ export function App({
       {pendingBash ? (
         <BashConfirm command={pendingBash.command} />
       ) : modelPickerOpen ? (
-        <ModelPicker current={model()} />
+        <ModelPicker
+          current={model()}
+          onConfirm={pickModel}
+          onCancel={() => setModelPickerOpen(false)}
+        />
       ) : (
         <Box flexDirection="column">
           {busy && (
