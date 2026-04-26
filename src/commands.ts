@@ -12,7 +12,14 @@ import { configDir } from "./config.js";
  * override a user's global commands in `~/.config/sprite/commands/`.
  */
 
-const BUILTINS = new Set(["clear", "compact", "logout", "model"]);
+export const BUILTIN_COMMANDS = [
+  { name: "clear", desc: "reset the conversation" },
+  { name: "compact", desc: "summarize and continue" },
+  { name: "model", desc: "pick a model for this session" },
+  { name: "logout", desc: "forget the saved API key" },
+];
+
+const BUILTINS = new Set(BUILTIN_COMMANDS.map((c) => c.name));
 
 function commandDirs(): string[] {
   return [

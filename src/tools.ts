@@ -4,7 +4,12 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
 import type Anthropic from "@anthropic-ai/sdk";
-import { configDir } from "./config.js";
+import {
+  configDir,
+  isBashAllowed,
+  allowBashPrefix,
+  suggestBashPrefix,
+} from "./config.js";
 
 /** The directory edits are confined to: the git root above cwd, or cwd itself. */
 function workspaceRoot(): string {
@@ -299,12 +304,6 @@ export type ToolContext = {
   askQuestion: (questions: Question[]) => Promise<QuestionAnswer[]>;
   /** Show a plan and resolve with approval or rejection feedback. */
   approvePlan: (plan: string) => Promise<PlanDecision>;
-  /** Persist a prefix to the project allowlist. */
-  allowPrefix: (prefix: string) => void;
-  /** Check the project allowlist. */
-  isAllowed: (command: string) => boolean;
-  /** Derive a prefix to save for "always". */
-  suggestPrefix: (command: string) => string;
 };
 
 export async function executeTool(
@@ -365,6 +364,29 @@ export async function executeTool(
   }
 }
 
+/** One-line summary of a tool's input for the transcript header. */
+export function summarizeInput(name: string, input: unknown): string {
+  const o = input as Record<string, unknown>;
+  switch (name) {
+    case "read_file":
+    case "list_files":
+    case "edit_file":
+      return String(o?.path ?? "");
+    case "bash":
+      return String(o?.command ?? "");
+    case "fetch_url":
+      return String(o?.url ?? "");
+    case "ask_user_question": {
+      const qs = o?.questions as Question[] | undefined;
+      return qs?.[0]?.header ?? "";
+    }
+    case "exit_plan_mode":
+      return "(plan)";
+    default:
+      return JSON.stringify(input);
+  }
+}
+
 function formatAnswers(answers: QuestionAnswer[]): string {
   if (answers.length === 0) return "User declined to answer.";
   const lines = answers.map((a) => `- "${a.question}" → ${a.answer}`);
@@ -376,13 +398,13 @@ async function runBash(
   ctx: ToolContext,
   signal?: AbortSignal,
 ): Promise<string> {
-  if (!ctx.trust && !ctx.isAllowed(command)) {
+  if (!ctx.trust && !isBashAllowed(command)) {
     const choice = await ctx.confirmBash(command);
     if (choice === "no") {
       throw new Error("Command denied by user.");
     }
     if (choice === "always") {
-      ctx.allowPrefix(ctx.suggestPrefix(command));
+      allowBashPrefix(suggestBashPrefix(command));
     }
   }
   return await bash(command, signal);
@@ -528,6 +550,7 @@ const FETCH_MAX_BYTES = 5 * 1024 * 1024;
 const FETCH_TIMEOUT_MS = 15_000;
 
 async function fetchUrl(url: string, signal?: AbortSignal): Promise<string> {
+  signal?.throwIfAborted();
   if (!/^https?:\/\//i.test(url)) {
     throw new Error(
       `fetch_url: URL must start with http:// or https:// (got: ${url})`,
@@ -551,18 +574,29 @@ async function fetchUrl(url: string, signal?: AbortSignal): Promise<string> {
       headers: { "user-agent": "sprite/0.1 (+https://github.com/anthropics)" },
     });
 
-    const len = parseInt(res.headers.get("content-length") || "0", 10);
-    if (len > FETCH_MAX_BYTES) {
-      return `[${res.status} ${res.statusText} · ${res.url}]\n[refused: content-length ${len} exceeds ${FETCH_MAX_BYTES} byte cap]`;
+    // Stream the body so a server without content-length (chunked) can't
+    // balloon memory past the cap before capTail trims the output.
+    const chunks: Buffer[] = [];
+    let bytes = 0;
+    let truncated = false;
+    for await (const chunk of res.body ?? []) {
+      const buf = Buffer.from(chunk);
+      chunks.push(buf);
+      bytes += buf.length;
+      if (bytes > FETCH_MAX_BYTES) {
+        truncated = true;
+        break;
+      }
     }
+    const body = Buffer.concat(chunks).toString("utf8");
 
     const ct = res.headers.get("content-type") || "";
-    const body = await res.text();
     const looksHtml = /\bhtml\b/i.test(ct) || /^\s*<(!doctype|html|head|body)/i.test(body);
     const text = looksHtml ? htmlToText(body) : body;
 
     const redirect = res.url !== url ? ` → ${res.url}` : "";
-    return `[${res.status} ${res.statusText} · ${url}${redirect}]\n${text}`;
+    const note = truncated ? ` · body cut at ${FETCH_MAX_BYTES} bytes` : "";
+    return `[${res.status} ${res.statusText} · ${url}${redirect}${note}]\n${text}`;
   } finally {
     clearTimeout(timer);
     signal?.removeEventListener("abort", onOuterAbort);

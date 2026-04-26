@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Box, Text, useApp, useInput } from "ink";
 import Spinner from "ink-spinner";
 import type Anthropic from "@anthropic-ai/sdk";
@@ -7,6 +7,7 @@ import { resolveCommand, listCommands } from "../commands.js";
 import { MODELS } from "../models.js";
 import {
   bash,
+  summarizeInput,
   type BashApproval,
   type PermissionMode,
   type PlanDecision,
@@ -16,14 +17,7 @@ import {
 } from "../tools.js";
 import { startSession, loadLastSession, type Session } from "../session.js";
 import { poem } from "../poem.js";
-import {
-  loadApiKey,
-  saveApiKey,
-  clearApiKey,
-  isBashAllowed,
-  allowBashPrefix,
-  suggestBashPrefix,
-} from "../config.js";
+import { loadApiKey, saveApiKey, clearApiKey } from "../config.js";
 import { PromptInput } from "./PromptInput.js";
 import { Header } from "./Header.js";
 import { Line, type DisplayLine } from "./Line.js";
@@ -68,14 +62,17 @@ export function App({
   const [elapsed, setElapsed] = useState(0);
   const [tokens, setTokens] = useState({ in: 0, out: 0 });
   const [contextUsed, setContextUsed] = useState(0);
+  const resumed = useMemo(
+    () => (resume ? loadLastSession() : []),
+    [resume],
+  );
   const [lines, setLines] = useState<DisplayLine[]>(() => {
     if (!resume) return [];
-    const prev = loadLastSession();
-    return prev.length > 0
+    return resumed.length > 0
       ? [
           {
             kind: "assistant",
-            text: `(resumed — ${prev.length} prior messages in context)`,
+            text: `(resumed — ${resumed.length} prior messages in context)`,
           },
         ]
       : [
@@ -85,9 +82,7 @@ export function App({
           },
         ];
   });
-  const [history, setHistory] = useState<Anthropic.MessageParam[]>(() =>
-    resume ? loadLastSession() : [],
-  );
+  const [history, setHistory] = useState<Anthropic.MessageParam[]>(resumed);
   const [inputHistory, setInputHistory] = useState<string[]>([]);
   const [bashMode, setBashMode] = useState(false);
   const [verbose, setVerbose] = useState(false);
@@ -119,9 +114,6 @@ export function App({
 
   const toolCtx = useRef<ToolContext>({
     trust,
-    isAllowed: isBashAllowed,
-    allowPrefix: allowBashPrefix,
-    suggestPrefix: suggestBashPrefix,
     getMode: () => modeRef.current,
     setMode,
     confirmBash: (command) =>
@@ -272,11 +264,11 @@ export function App({
   const handleSubmit = async (value: string) => {
     const text = value.trim();
     if (!text) return;
+    setInput("");
 
     // A turn is already running — stash this for when it finishes. One
     // slot; a second Enter replaces the first.
     if (busyRef.current) {
-      setInput("");
       setQueued(text);
       return;
     }
@@ -287,7 +279,6 @@ export function App({
     }
 
     if (text === "/clear") {
-      setInput("");
       setLines([]);
       setHistory([]);
       setContextUsed(0);
@@ -296,7 +287,6 @@ export function App({
     }
 
     if (text === "/compact") {
-      setInput("");
       if (history.length === 0) {
         push({ kind: "error", text: "Nothing to compact yet." });
         return;
@@ -325,7 +315,6 @@ export function App({
 
     if (bashMode || text.startsWith("!")) {
       const cmd = bashMode ? text : text.slice(1).trim();
-      setInput("");
       setBashMode(false);
       if (!cmd) return;
       setInputHistory((h) =>
@@ -369,7 +358,6 @@ export function App({
 
     if (text === "/logout") {
       clearApiKey();
-      setInput("");
       setApiKey(undefined);
       setLines([]);
       setHistory([]);
@@ -377,14 +365,12 @@ export function App({
     }
 
     if (text === "/model") {
-      setInput("");
       setModelPickerOpen(true);
       return;
     }
 
     // Allow a direct pick: /model <id> skips the picker UI.
     if (text.startsWith("/model ")) {
-      setInput("");
       const id = text.slice(7).trim();
       const picked = MODELS.find((m) => m.id === id || m.id.endsWith(id));
       if (!picked) {
@@ -394,12 +380,7 @@ export function App({
         });
         return;
       }
-      process.env.SPRITE_MODEL = picked.id;
-      setModelTick((t) => t + 1);
-      push({
-        kind: "assistant",
-        text: `Model set to ${picked.id}. New turns will use it; history stays.`,
-      });
+      pickModel(picked.id);
       return;
     }
 
@@ -412,7 +393,6 @@ export function App({
       const args = sp === -1 ? "" : text.slice(sp + 1).trim();
       const expanded = resolveCommand(name, args);
       if (expanded === undefined) {
-        setInput("");
         const avail = listCommands();
         push({
           kind: "error",
@@ -426,7 +406,6 @@ export function App({
       message = expanded;
     }
 
-    setInput("");
     setInputHistory((h) => (h[h.length - 1] === text ? h : [...h, text]));
     setPhrase(poem());
     setBusy(true);
@@ -558,17 +537,6 @@ export function App({
       )}
     </Box>
   );
-}
-
-/** One-line summary of a tool's input for the header, instead of raw JSON. */
-function summarizeInput(name: string, input: unknown): string {
-  const o = input as Record<string, unknown>;
-  if (name === "read_file" || name === "list_files")
-    return String(o?.path ?? "");
-  if (name === "edit_file") return String(o?.path ?? "");
-  if (name === "bash") return String(o?.command ?? "");
-  if (name === "fetch_url") return String(o?.url ?? "");
-  return JSON.stringify(input);
 }
 
 function fmtTokens(n: number): string {

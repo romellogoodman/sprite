@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Box, Text, useInput } from "ink";
 import type { PlanDecision } from "../tools.js";
+import { Markdown } from "./Markdown.js";
 
 /**
  * Shows a plan (markdown string) and collects approve / reject.
@@ -52,9 +53,7 @@ export function PlanApproval({
         Plan ready for approval
       </Text>
       <Box flexDirection="column" marginTop={1} marginBottom={1}>
-        {plan.split("\n").map((line, i) => (
-          <Text key={i}>{line || " "}</Text>
-        ))}
+        <Markdown>{plan}</Markdown>
       </Box>
       {mode === "prompt" ? (
         <Text dimColor>

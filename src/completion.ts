@@ -1,27 +1,13 @@
 import fs from "node:fs";
 import path from "node:path";
+import { BUILTIN_COMMANDS, listCommands } from "./commands.js";
 
 export type Completion = {
   value: string;
   desc?: string;
 };
 
-export const SLASH_COMMANDS: Completion[] = [
-  { value: "/clear", desc: "reset the conversation" },
-  { value: "/compact", desc: "summarize and continue" },
-  { value: "/model", desc: "pick a model for this session" },
-  { value: "/logout", desc: "forget the saved API key" },
-];
-
-const SKIP_DIRS = new Set([
-  "node_modules",
-  ".git",
-  "dist",
-  "build",
-  ".next",
-  ".cache",
-  "coverage",
-]);
+const SKIP_DIRS = new Set(["node_modules", "dist", "build", "coverage"]);
 
 let fileCache: string[] | null = null;
 
@@ -114,7 +100,11 @@ export function findTrigger(value: string, cursor: number): Trigger | null {
 export function getCompletions(t: Trigger): Completion[] {
   if (t.type === "slash") {
     const q = t.query.toLowerCase();
-    return SLASH_COMMANDS.filter((c) => c.value.slice(1).startsWith(q));
+    const all: Completion[] = [
+      ...BUILTIN_COMMANDS.map((c) => ({ value: "/" + c.name, desc: c.desc })),
+      ...listCommands().map((name) => ({ value: "/" + name, desc: "custom" })),
+    ];
+    return all.filter((c) => c.value.slice(1).startsWith(q));
   }
   return fuzzy(listProjectFiles(), t.query).map((f) => ({ value: "@" + f }));
 }

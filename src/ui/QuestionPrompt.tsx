@@ -114,10 +114,6 @@ function SingleQuestion({
         const picks = selected.has(cursor)
           ? [...selected]
           : [...selected, cursor];
-        if (picks.length === 0) {
-          onAnswer(options[cursor].label);
-          return;
-        }
         const labels = picks
           .sort((a, b) => a - b)
           .map((i) => options[i].label)

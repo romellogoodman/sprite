@@ -1,11 +1,6 @@
 import { runTurn } from "./agent.js";
-import type { ToolContext } from "./tools.js";
-import {
-  loadApiKey,
-  isBashAllowed,
-  allowBashPrefix,
-  suggestBashPrefix,
-} from "./config.js";
+import { summarizeInput, type ToolContext } from "./tools.js";
+import { loadApiKey } from "./config.js";
 
 /**
  * Headless one-shot: run a single turn, write assistant text to stdout and
@@ -23,9 +18,6 @@ export async function runPrint(prompt: string, trust: boolean): Promise<void> {
 
   const ctx: ToolContext = {
     trust,
-    isAllowed: isBashAllowed,
-    allowPrefix: allowBashPrefix,
-    suggestPrefix: suggestBashPrefix,
     // Headless mode runs in 'default'; no TTY to cycle from.
     getMode: () => "default",
     setMode: () => {},
@@ -58,7 +50,7 @@ export async function runPrint(prompt: string, trust: boolean): Promise<void> {
       if (e.type === "text") {
         process.stdout.write(e.text + "\n");
       } else if (e.type === "tool_use") {
-        process.stderr.write(`⚙ ${e.name} ${JSON.stringify(e.input)}\n`);
+        process.stderr.write(`⚙ ${e.name} ${summarizeInput(e.name, e.input)}\n`);
       } else if (e.type === "tool_result") {
         const mark = e.isError ? "✗" : "✓";
         process.stderr.write(`${mark} ${e.name}\n`);
