@@ -1,6 +1,6 @@
 # sprite
 
-A CLI coding agent — an LLM in a loop with four file tools. It works in whatever directory you run it from.
+A CLI coding agent — an LLM in a loop with a handful of tools. It works in whatever directory you run it from.
 
 ## Architecture
 
@@ -21,26 +21,32 @@ TypeScript/Node (ESM), `@anthropic-ai/sdk`, `ink`+React for the TUI.
 
 ## Layout
 
-- `src/cli.tsx` — entry; routes to `<App />` or headless `runPrint()`
+- `src/cli.tsx` — entry; routes to `<App />`, stdin pipe, or headless `runPrint()`
+- `src/index.ts` — library entry for `import { runTurn } from "sprite"`
+- `src/agent.ts` — `runTurn()` loop, system prompt, `/compact`, `@path` expansion, `AgentEvent`
+- `src/tools.ts` — tool defs + execution, `ToolContext`, `headlessContext()`, 50 KB output cap
+- `src/commands.ts` — custom `/command` loader (`.sprite/commands/*.md`)
+- `src/models.ts` — model catalog for the picker and context-window lookup
+- `src/print.ts` — `-p` one-shot mode
+- `src/session.ts` — JSONL persistence under `~/.config/sprite/sessions/`
+- `src/config.ts` — API key + per-project bash allowlist
+- `src/completion.ts`, `src/poem.ts` — typeahead matches, spinner phrases
 - `src/ui/` — Ink/React components
   - `App.tsx` — top-level state, slash commands, event loop wiring
   - `Line.tsx` — renders one transcript row; owns `DisplayLine`
   - `Markdown.tsx` — marked→Ink renderer for assistant text
   - `PromptInput.tsx` — input: cursor, history, bracketed paste
-  - `Header.tsx`, `BashConfirm.tsx`, `Login.tsx`
-- `src/agent.ts` — `runTurn()` loop, system prompt, `/compact`, `@path` expansion
-- `src/tools.ts` — the four tools + 50 KB output cap
-- `src/print.ts` — `-p` one-shot mode
-- `src/session.ts` — JSONL persistence under `~/.config/sprite/sessions/`
-- `src/config.ts` — API key + per-project bash allowlist
+  - `Header.tsx`, `BashConfirm.tsx`, `Login.tsx`, `ModelPicker.tsx`, `QuestionPrompt.tsx`, `PlanApproval.tsx`
 
 See README.md for user-facing flags and commands.
 
 ## Tools
 
-Current set: `read_file`, `list_files`, `edit_file`, `bash`, `fetch_url`. Keep the set small — additions need a real reason, not just convenience. Most new capabilities should go through `bash` or a script the model writes. Evaluate proposals on their merits; don't refuse reflexively.
+Capability tools: `read_file`, `list_files`, `edit_file`, `bash`, `fetch_url`. Control-flow tools: `ask_user_question` (multi-choice, always available), `exit_plan_mode` (plan mode only). Keep the capability set small — additions need a real reason, not just convenience. Most new capabilities should go through `bash` or a script the model writes. Evaluate proposals on their merits; don't refuse reflexively.
 
 ## Permissions
+
+Two modes, cycled with shift+tab: `default` and `plan`. Plan mode refuses `edit_file` and non-read-only `bash`; the turn ends with `exit_plan_mode(plan)` which prompts for approval and drops back to `default`. The mode is read live via `ctx.getMode()` so mid-turn flips apply to the next tool call.
 
 `bash` prompts for confirmation; "always" saves a prefix to `~/.config/sprite/projects.json` keyed by absolute cwd (so a cloned repo can't pre-seed its own allowlist). Commands with shell operators always prompt. `--trust` skips it all. When touching this path, err toward more confirmation, not less.
 

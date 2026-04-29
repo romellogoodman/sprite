@@ -22,11 +22,12 @@ This package is not deployed to npm — link it locally to make the `sprite` com
 From any directory:
 
 ```sh
-sprite                    # interactive
-sprite -c                 # continue the last session in this directory
-sprite -p "run the tests" # one-shot: print and exit (scriptable; stderr shows tool activity)
-sprite --trust            # skip bash confirmations
-sprite --model <id>       # pick the model (default: claude-haiku-4-5)
+sprite                            # interactive
+sprite -c                         # continue the last session in this directory
+sprite -p "run the tests"         # one-shot: print to stdout, tool activity to stderr
+git diff | sprite -p "review"     # pipe stdin; combines with -p if both are given
+sprite --trust                    # skip bash confirmations
+sprite --model <id>               # pick the model (default: claude-haiku-4-5)
 ```
 
 `--model` only takes Claude models — see the [model overview](https://platform.claude.com/docs/en/about-claude/models/overview) for valid API strings. You can also set `SPRITE_MODEL` in your environment.
@@ -36,16 +37,27 @@ First launch will ask for an Anthropic API key. It's saved to `~/.config/sprite/
 ## In the prompt
 
 - `↑ / ↓` — recall previous prompts
-- `Esc` — clear the input
+- `Shift+Tab` — toggle plan mode (read-only; propose a plan for approval before editing)
+- `Esc` — clear the input; if a turn is running, cancel it
+- `Ctrl+O` — expand/collapse tool output in the transcript
 - `Ctrl+A / E / U` — start of line, end of line, clear line
 - `! <command>` — run a shell command yourself; output shows inline, no tokens spent
 - `@path/to/file` — the file's contents are inlined when you submit
 - Multi-line pastes collapse to `[Pasted #1 N lines]` and expand on submit
+- Typing while a turn runs is fine — `Enter` queues one follow-up for when it finishes
 - `/clear` — reset the conversation
 - `/compact` — summarize the conversation so far and keep going with just the summary in context
 - `/model` — pick a model for the rest of the session (or `/model <id>` to switch directly)
 - `/logout` — forget the saved API key
 - `exit` — quit
+
+## Custom commands
+
+Drop a markdown file in `./.sprite/commands/` (project) or `~/.config/sprite/commands/` (global) and it becomes a `/command`. The file's body is sent as the prompt; `$ARGS` is replaced with whatever you type after the command name. Project commands shadow global ones of the same name.
+
+```
+./.sprite/commands/review.md   →   /review [args]
+```
 
 ## Project context
 
@@ -55,6 +67,23 @@ sprite reads `AGENTS.md`, `AGENT.md`, and `CLAUDE.md` from the current directory
 
 Shell commands prompt for confirmation before running. Choosing "always" remembers the command prefix for this project (stored in `~/.config/sprite/projects.json`, keyed by directory so a cloned repo can't pre-seed its own allowlist). Commands containing shell operators (`;`, `|`, `$(` …) always prompt. `--trust` skips all of it.
 
+Edits are confined to the git root (or cwd if there isn't one); paths outside it are refused.
+
+## As a library
+
+sprite exports its loop. There's no build step — consume it with a TS-aware runtime (`tsx`, `bun`, `ts-node`):
+
+```ts
+import { runTurn, headlessContext, loadApiKey } from "sprite";
+
+await runTurn(loadApiKey()!, [], "explain this repo",
+  headlessContext({ trust: true }),
+  (e) => { if (e.type === "text") process.stdout.write(e.text); },
+);
+```
+
+`runTurn` emits `text`, `tool_use`, `tool_result`, `usage`, and `done` events; it returns the updated message history so you can pass it back in for the next turn. `headlessContext()` denies unapproved bash by default — pass `trust: true` or your own `onBash` to change that.
+
 ## Storage
 
 ```
@@ -62,6 +91,7 @@ Shell commands prompt for confirmation before running. Choosing "always" remembe
   config.json        API key
   projects.json      per-directory bash allowlists
   AGENTS.md          global instructions (optional)
+  commands/*.md      global custom /commands (optional)
   sessions/<dir>/    conversation history, one JSONL per session
 ```
 
