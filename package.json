@@ -3,6 +3,8 @@
   "version": "0.0.1",
   "description": "A CLI coding agent — an LLM in a loop with file tools.",
   "type": "module",
+  "exports": "./src/index.ts",
+  "types": "./src/index.ts",
   "bin": {
     "sprite": "./bin/sprite.mjs"
   },

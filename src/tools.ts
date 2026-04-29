@@ -306,6 +306,29 @@ export type ToolContext = {
   approvePlan: (plan: string) => Promise<PlanDecision>;
 };
 
+/**
+ * A ToolContext for driving runTurn without a UI. Mode is fixed to 'default';
+ * interactive tools (ask_user_question, exit_plan_mode) auto-decline. bash
+ * calls that aren't already allowlisted go to onBash — defaulting to deny, so
+ * pass `trust: true` or your own onBash if you want commands to run.
+ */
+export function headlessContext(opts?: {
+  trust?: boolean;
+  onBash?: (command: string) => Promise<BashApproval>;
+}): ToolContext {
+  return {
+    trust: opts?.trust ?? false,
+    getMode: () => "default",
+    setMode: () => {},
+    confirmBash: opts?.onBash ?? (async () => "no"),
+    askQuestion: async () => [],
+    approvePlan: async () => ({
+      approved: false,
+      feedback: "headless mode; plan approval unavailable",
+    }),
+  };
+}
+
 export async function executeTool(
   name: string,
   input: ToolInput,

@@ -184,7 +184,8 @@ export type AgentEvent =
   | { type: "tool_use"; id: string; name: string; input: unknown }
   | { type: "tool_result"; id: string; name: string; output: string; isError: boolean }
   | { type: "usage"; input: number; output: number }
-  | { type: "compacted"; before: number; after: number; pct: number };
+  | { type: "compacted"; before: number; after: number; pct: number }
+  | { type: "done"; durationMs: number; input: number; output: number };
 
 /** Rough token count. Good enough to decide where to cut; not for billing. */
 function estimateTokens(m: Anthropic.MessageParam): number {
@@ -287,6 +288,10 @@ export async function runTurn(
     { role: "user", content: firstMessage },
   ];
 
+  const started = Date.now();
+  let totalIn = 0;
+  let totalOut = 0;
+
   while (true) {
     signal?.throwIfAborted();
     const stream = client.messages.stream(
@@ -310,11 +315,10 @@ export async function runTurn(
       (response.usage.input_tokens ?? 0) +
       (response.usage.cache_read_input_tokens ?? 0) +
       (response.usage.cache_creation_input_tokens ?? 0);
-    onEvent({
-      type: "usage",
-      input: inputTokens,
-      output: response.usage.output_tokens ?? 0,
-    });
+    const outputTokens = response.usage.output_tokens ?? 0;
+    totalIn += inputTokens;
+    totalOut += outputTokens;
+    onEvent({ type: "usage", input: inputTokens, output: outputTokens });
 
     const toolUses: Anthropic.ToolUseBlock[] = [];
     for (const block of response.content) {
@@ -332,6 +336,12 @@ export async function runTurn(
     messages.push({ role: "assistant", content: response.content });
 
     if (response.stop_reason === "end_turn" || toolUses.length === 0) {
+      onEvent({
+        type: "done",
+        durationMs: Date.now() - started,
+        input: totalIn,
+        output: totalOut,
+      });
       return messages;
     }
 

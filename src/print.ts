@@ -1,5 +1,5 @@
 import { runTurn } from "./agent.js";
-import { summarizeInput, type ToolContext } from "./tools.js";
+import { summarizeInput, headlessContext } from "./tools.js";
 import { loadApiKey } from "./config.js";
 
 /**
@@ -16,28 +16,15 @@ export async function runPrint(prompt: string, trust: boolean): Promise<void> {
     process.exit(1);
   }
 
-  const ctx: ToolContext = {
+  const ctx = headlessContext({
     trust,
-    // Headless mode runs in 'default'; no TTY to cycle from.
-    getMode: () => "default",
-    setMode: () => {},
-    confirmBash: async (command) => {
+    onBash: async (command) => {
       process.stderr.write(
         `✗ bash denied (non-interactive): ${command}\n  Re-run with --trust or allowlist the command interactively.\n`,
       );
       return "no";
     },
-    askQuestion: async () => {
-      process.stderr.write(
-        "✗ ask_user_question unavailable in non-interactive mode (-p).\n",
-      );
-      return [];
-    },
-    approvePlan: async () => ({
-      approved: false,
-      feedback: "non-interactive mode; plan approval unavailable",
-    }),
-  };
+  });
 
   const controller = new AbortController();
   process.once("SIGINT", () => {
@@ -54,6 +41,9 @@ export async function runPrint(prompt: string, trust: boolean): Promise<void> {
       } else if (e.type === "tool_result") {
         const mark = e.isError ? "✗" : "✓";
         process.stderr.write(`${mark} ${e.name}\n`);
+      } else if (e.type === "done") {
+        const s = (e.durationMs / 1000).toFixed(1);
+        process.stderr.write(`✓ done ${s}s · ${e.input} in / ${e.output} out\n`);
       }
     }, controller.signal);
   } catch (err) {
