@@ -50,6 +50,8 @@ Two modes, cycled with shift+tab: `default` and `plan`. Plan mode refuses `edit_
 
 `bash` prompts for confirmation; "always" saves a prefix to `~/.config/sprite/projects.json` keyed by absolute cwd (so a cloned repo can't pre-seed its own allowlist). Commands with shell operators always prompt. `--trust` skips it all. When touching this path, err toward more confirmation, not less.
 
+Bash is spawned with a narrow env whitelist by default (`SAFE_ENV_KEYS` in `tools.ts`) — PATH/HOME/locale/etc., no secrets. `--trust` or `SPRITE_FULL_ENV=1` forwards `process.env`; `SPRITE_EXPOSE_ENV=VAR1,VAR2` widens just those vars. Closes the "model runs `env | grep KEY`" and "approved-prefix with `$VAR` expansion" exfil paths.
+
 ## Principles
 
 - Keep the loop small. Complexity belongs in tool implementations, not orchestration.

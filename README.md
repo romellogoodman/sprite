@@ -69,6 +69,12 @@ Shell commands prompt for confirmation before running. Choosing "always" remembe
 
 Edits are confined to the git root (or cwd if there isn't one); paths outside it are refused.
 
+Bash runs with a narrowed environment by default — `PATH`, `HOME`, `USER`, `SHELL`, locale, `TZ`, `TERM`, temp-dir vars. Project secrets in your shell (`ANTHROPIC_API_KEY`, `*_TOKEN`, `DATABASE_URL`, etc.) aren't forwarded, so the model can't exfiltrate them by running `env` or expanding `$VAR` inside an approved command. Widen as needed:
+
+- `--trust` — full env (paired with skipping confirmations; use when you already trust the agent).
+- `SPRITE_EXPOSE_ENV=NODE_ENV,DATABASE_URL sprite` — forward just the listed vars, keep the rest hidden.
+- `SPRITE_FULL_ENV=1 sprite` — forward everything without `--trust`'s other effects.
+
 ## As a library
 
 sprite exports its loop. There's no build step — consume it with a TS-aware runtime (`tsx`, `bun`, `ts-node`):

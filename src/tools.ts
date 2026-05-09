@@ -430,7 +430,45 @@ async function runBash(
       allowBashPrefix(suggestBashPrefix(command));
     }
   }
-  return await bash(command, signal);
+  return await bash(command, signal, resolveBashEnv(ctx.trust));
+}
+
+// Keys forwarded to every bash invocation. Enough for typical tools to work
+// (git, npm, locale-aware output, temp files) while keeping API keys, tokens,
+// and project secrets out of the model's reach. Users who need more either
+// pass `--trust` (full env) or list var names in SPRITE_EXPOSE_ENV.
+const SAFE_ENV_KEYS = [
+  "PATH",
+  "HOME",
+  "USER",
+  "LOGNAME",
+  "HOSTNAME",
+  "SHELL",
+  "LANG",
+  "LC_ALL",
+  "LC_CTYPE",
+  "TZ",
+  "TERM",
+  "TMPDIR",
+  "TMP",
+  "TEMP",
+] as const;
+
+function resolveBashEnv(trust: boolean): NodeJS.ProcessEnv {
+  if (trust || process.env.SPRITE_FULL_ENV === "1") return process.env;
+  const env: NodeJS.ProcessEnv = {};
+  for (const k of SAFE_ENV_KEYS) {
+    const v = process.env[k];
+    if (v !== undefined) env[k] = v;
+  }
+  const expose = process.env.SPRITE_EXPOSE_ENV;
+  if (expose) {
+    for (const k of expose.split(",").map((s) => s.trim()).filter(Boolean)) {
+      const v = process.env[k];
+      if (v !== undefined) env[k] = v;
+    }
+  }
+  return env;
 }
 
 function readFile(relPath: string, offset = 1, limit = 2000): string {
@@ -681,13 +719,18 @@ function killTree(pid: number): void {
   } catch {}
 }
 
-export function bash(command: string, signal?: AbortSignal): Promise<string> {
+export function bash(
+  command: string,
+  signal?: AbortSignal,
+  env?: NodeJS.ProcessEnv,
+): Promise<string> {
   signal?.throwIfAborted();
   return new Promise((resolve, reject) => {
     const child = spawn(command, {
       shell: true,
       detached: process.platform !== "win32",
       stdio: ["ignore", "pipe", "pipe"],
+      env: env ?? process.env,
     });
     if (child.pid) liveBash.add(child.pid);
 
