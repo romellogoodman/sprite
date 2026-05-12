@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Box, Text, useApp, useInput } from "ink";
+import { Box, Static, Text, useApp, useInput } from "ink";
 import Spinner from "ink-spinner";
 import type Anthropic from "@anthropic-ai/sdk";
 import { runTurn, compactHistory, model, type AgentEvent } from "../agent.js";
@@ -87,6 +87,25 @@ export function App({
           },
         ];
   });
+  // `committedCount` is the prefix of `lines` that's been frozen into the
+  // <Static> buffer so the terminal can scroll it natively. A line is safe to
+  // freeze once it's guaranteed to stop mutating: users/errors on arrival,
+  // tools when their output lands, assistant text once a newer line seals it.
+  const committedCount = useMemo(() => {
+    let n = 0;
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i]!;
+      const isLast = i === lines.length - 1;
+      const done =
+        line.kind === "user" ||
+        line.kind === "error" ||
+        (line.kind === "tool" && line.output !== undefined) ||
+        (line.kind === "assistant" && !isLast);
+      if (!done) break;
+      n = i + 1;
+    }
+    return n;
+  }, [lines]);
   const [history, setHistory] = useState<Anthropic.MessageParam[]>(resumed);
   const [inputHistory, setInputHistory] = useState<string[]>([]);
   const [bashMode, setBashMode] = useState(false);
@@ -476,9 +495,13 @@ export function App({
     <Box flexDirection="column">
       <Header contextUsed={contextUsed} mode={mode} />
 
-      <Box flexDirection="column" marginBottom={1} overflow="hidden">
-        {lines.map((line, i) => (
-          <Line key={i} line={line} verbose={verbose} />
+      <Static items={lines.slice(0, committedCount)}>
+        {(line, i) => <Line key={i} line={line} verbose={verbose} />}
+      </Static>
+
+      <Box flexDirection="column" marginBottom={1}>
+        {lines.slice(committedCount).map((line, i) => (
+          <Line key={committedCount + i} line={line} verbose={verbose} />
         ))}
       </Box>
 
