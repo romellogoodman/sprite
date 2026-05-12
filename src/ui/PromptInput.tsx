@@ -238,12 +238,14 @@ export function PromptInput({
 
   return (
     <Box flexDirection="column">
-      {showCompletions && (
-        <>
-          <Dropdown items={completions} selected={compSel} cols={cols} />
-          <Text dimColor>{"─".repeat(cols)}</Text>
-        </>
-      )}
+      <Box flexDirection="column" height={showCompletions ? MAX_VISIBLE + 1 : 0}>
+        {showCompletions && (
+          <>
+            <Dropdown items={completions} selected={compSel} cols={cols} />
+            <Text dimColor>{"─".repeat(cols)}</Text>
+          </>
+        )}
+      </Box>
       <Box>
         {prefix}
         <Text>{line}</Text>

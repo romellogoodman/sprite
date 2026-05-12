@@ -476,7 +476,7 @@ export function App({
     <Box flexDirection="column">
       <Header contextUsed={contextUsed} mode={mode} />
 
-      <Box flexDirection="column" marginBottom={1}>
+      <Box flexDirection="column" marginBottom={1} overflow="hidden">
         {lines.map((line, i) => (
           <Line key={i} line={line} verbose={verbose} />
         ))}
