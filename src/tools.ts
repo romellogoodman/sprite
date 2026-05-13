@@ -308,6 +308,32 @@ function cap(s: string): string {
 }
 
 /**
+ * Spill files are useful within a session (the model can grep the truncated
+ * part) but meaningless after it ends. Sweep stale ones on startup so they
+ * don't accumulate forever in /tmp. Fire-and-forget; failures are fine.
+ */
+function sweepSpillFiles(maxAgeMs = 24 * 60 * 60 * 1000): void {
+  const dir = os.tmpdir();
+  const cutoff = Date.now() - maxAgeMs;
+  let entries: string[];
+  try {
+    entries = fs.readdirSync(dir);
+  } catch {
+    return;
+  }
+  for (const name of entries) {
+    if (!/^sprite-bash-[0-9a-f]{8}\.log$/.test(name)) continue;
+    const full = path.join(dir, name);
+    try {
+      if (fs.statSync(full).mtimeMs < cutoff) fs.unlinkSync(full);
+    } catch {
+      // already gone, not ours, etc.
+    }
+  }
+}
+sweepSpillFiles();
+
+/**
  * For bash output the end is what matters (errors, test summaries), so keep
  * the tail. The full output is spilled to a temp file so the model can grep
  * or `sed -n` it if the truncated part turns out to matter.

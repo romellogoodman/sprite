@@ -19,6 +19,26 @@ export type Session = {
   save: (history: Anthropic.MessageParam[]) => void;
 };
 
+// Each /clear and each launch writes a new JSONL; without a cap the per-project
+// directory grows forever. Keep a generous tail and drop the rest.
+const KEEP_SESSIONS = 20;
+
+function pruneSessions(dir: string): void {
+  let files: string[];
+  try {
+    files = fs.readdirSync(dir).filter((f) => f.endsWith(".jsonl")).sort();
+  } catch {
+    return;
+  }
+  for (const old of files.slice(0, Math.max(0, files.length - KEEP_SESSIONS))) {
+    try {
+      fs.unlinkSync(path.join(dir, old));
+    } catch {
+      // best effort
+    }
+  }
+}
+
 /**
  * Start a new session file for this cwd. Returns a save() that rewrites the
  * file with the full history as JSONL. Rewriting is fine at sprite's scale
@@ -27,6 +47,7 @@ export type Session = {
 export function startSession(cwd: string = process.cwd()): Session {
   const dir = sessionDir(cwd);
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  pruneSessions(dir);
   const file = path.join(dir, `${new Date().toISOString().replace(/[:.]/g, "-")}.jsonl`);
   return {
     file,
