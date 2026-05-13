@@ -1,5 +1,9 @@
 import fs from "node:fs";
 import os from "node:os";
+import net from "node:net";
+import dns from "node:dns";
+import http from "node:http";
+import https from "node:https";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
@@ -23,6 +27,15 @@ function workspaceRoot(): string {
 }
 
 const WORKSPACE = workspaceRoot();
+// Realpath so a symlinked checkout (~/code -> /Volumes/dev/code) still
+// compares equal to realpath'd read targets below.
+const WORKSPACE_REAL = (() => {
+  try {
+    return fs.realpathSync(WORKSPACE);
+  } catch {
+    return WORKSPACE;
+  }
+})();
 const CONFIG_DIR = configDir();
 
 function isInside(child: string, parent: string): boolean {
@@ -39,6 +52,34 @@ function assertWritable(relPath: string): string {
   if (!isInside(abs, WORKSPACE) && abs !== WORKSPACE) {
     throw new Error(
       `Refusing to edit outside the workspace (${WORKSPACE}): ${abs}`,
+    );
+  }
+  return abs;
+}
+
+/**
+ * Refuse reads outside the workspace. `edit_file` has always been confined;
+ * `read_file`/`list_files` were not, which left a quiet exfil path — a prompt
+ * injection in a cloned repo's README could ask for ~/.ssh/id_rsa and the
+ * content would land in the transcript. Reads resolve symlinks first so a
+ * `link -> /etc` inside the repo can't route around the check. Legit
+ * out-of-tree reads go through `bash` (which has its own confirmation gate).
+ */
+function assertReadable(relPath: string): string {
+  const abs = path.resolve(relPath);
+  let real = abs;
+  try {
+    real = fs.realpathSync(abs);
+  } catch {
+    // Doesn't exist / can't stat — readFile will throw a clearer error.
+  }
+  if (isInside(real, CONFIG_DIR) || real === CONFIG_DIR) {
+    throw new Error(`Refusing to read sprite's own config: ${abs}`);
+  }
+  if (!isInside(real, WORKSPACE_REAL) && real !== WORKSPACE_REAL) {
+    throw new Error(
+      `Refusing to read outside the workspace (${WORKSPACE}): ${abs}. ` +
+        `Use bash (e.g. \`cat\`) if you genuinely need a file from outside the project — it goes through the confirmation gate.`,
     );
   }
   return abs;
@@ -71,7 +112,7 @@ const ALL_TOOLS: Anthropic.Tool[] = [
   {
     name: "read_file",
     description:
-      "Read a file at the given relative path. Returns up to 2000 lines; for larger files pass offset/limit to page through it. Use this to inspect existing code or configuration before making changes.",
+      "Read a file at the given relative path. Returns up to 2000 lines; for larger files pass offset/limit to page through it. Use this to inspect existing code or configuration before making changes. Reads are confined to the current project (the git root); for files outside it, use bash (e.g. `cat`).",
     input_schema: {
       type: "object",
       properties: {
@@ -165,7 +206,7 @@ const ALL_TOOLS: Anthropic.Tool[] = [
   {
     name: "fetch_url",
     description:
-      "Fetch a URL and return its text content. Use for reading public docs, blog posts, READMEs, raw source files, API responses — anywhere the user pastes a link or you need external context. HTML is stripped to plain text (scripts and styles removed); JSON and text/* pass through as-is. Follows redirects, times out after 15s, caps output at 50KB. Not for authenticated pages or JavaScript-heavy SPAs — those return near-empty content.",
+      "Fetch a public URL and return its text content. Use for reading public docs, blog posts, READMEs, raw source files, API responses — anywhere the user pastes a link or you need external context. HTML is stripped to plain text (scripts and styles removed); JSON and text/* pass through as-is. Follows redirects, times out after 15s, caps output at 50KB. Not for authenticated pages or JavaScript-heavy SPAs — those return near-empty content. Refuses private/local addresses (localhost, 10.x, 192.168.x, link-local, etc.); use bash + curl for those.",
     input_schema: {
       type: "object",
       properties: {
@@ -472,6 +513,7 @@ function resolveBashEnv(trust: boolean): NodeJS.ProcessEnv {
 }
 
 function readFile(relPath: string, offset = 1, limit = 2000): string {
+  assertReadable(relPath);
   const content = fs.readFileSync(relPath, "utf8");
   const lines = content.split("\n");
   const total = lines.length;
@@ -488,6 +530,7 @@ function readFile(relPath: string, offset = 1, limit = 2000): string {
 }
 
 function listFiles(relPath: string): string {
+  assertReadable(relPath);
   const entries = fs.readdirSync(relPath, { withFileTypes: true });
   const names = entries.map((e) => (e.isDirectory() ? `${e.name}/` : e.name));
   return JSON.stringify(names, null, 2);
@@ -603,12 +646,139 @@ function renderDiff(content: string, oldStr: string, newStr: string): string {
 /**
  * Fetch a URL and return its text. HTML bodies are stripped to plain text so
  * the model isn't paying tokens for `<div class="wrapper">` soup. Not a
- * browser — JS never runs, so SPAs come back mostly empty. Follows redirects
- * (fetch's default) and respects the outer AbortSignal so Esc cancels it
- * like any other tool call.
+ * browser — JS never runs, so SPAs come back mostly empty. Respects the outer
+ * AbortSignal so Esc cancels it like any other tool call.
+ *
+ * Built on node:http/https (not fetch) so the SSRF guard can run inside the
+ * socket's own `lookup` — the address that's vetted is the address that's
+ * connected to, which closes the check-then-resolve-again rebinding window a
+ * pre-flight DNS check would leave open. Redirects are followed manually so
+ * every hop goes through the same gate.
  */
 const FETCH_MAX_BYTES = 5 * 1024 * 1024;
 const FETCH_TIMEOUT_MS = 15_000;
+const FETCH_MAX_REDIRECTS = 5;
+
+// Ranges fetch_url must never connect to. These stand between a prompt
+// injection ("fetch this link") and the cloud metadata endpoint, a local admin
+// panel, or anything else bound to loopback. If the user genuinely needs a
+// local URL, `bash` + curl goes through the confirmation gate.
+const PRIVATE_NETS = new net.BlockList();
+// IPv4
+PRIVATE_NETS.addSubnet("0.0.0.0", 8); // "this" network
+PRIVATE_NETS.addSubnet("10.0.0.0", 8); // RFC1918
+PRIVATE_NETS.addSubnet("100.64.0.0", 10); // CGN
+PRIVATE_NETS.addSubnet("127.0.0.0", 8); // loopback
+PRIVATE_NETS.addSubnet("169.254.0.0", 16); // link-local (cloud metadata)
+PRIVATE_NETS.addSubnet("172.16.0.0", 12); // RFC1918
+PRIVATE_NETS.addSubnet("192.0.0.0", 24); // IETF protocol assignments
+PRIVATE_NETS.addSubnet("192.168.0.0", 16); // RFC1918
+PRIVATE_NETS.addSubnet("198.18.0.0", 15); // benchmark
+// IPv6
+PRIVATE_NETS.addSubnet("::", 128, "ipv6"); // unspecified
+PRIVATE_NETS.addSubnet("::1", 128, "ipv6"); // loopback
+PRIVATE_NETS.addSubnet("fc00::", 7, "ipv6"); // ULA
+PRIVATE_NETS.addSubnet("fe80::", 10, "ipv6"); // link-local
+PRIVATE_NETS.addSubnet("64:ff9b::", 96, "ipv6"); // NAT64
+// Don't add ::ffff:0:0/96 — BlockList stores IPv4 as v4-mapped v6 internally,
+// so that rule would match every IPv4 address. The inverse is what we want and
+// already works: v4-mapped IPv6 (dotted or hex form) matches the v4 rules.
+
+function isPrivateAddress(addr: string): boolean {
+  const fam = net.isIP(addr);
+  if (fam === 4) return PRIVATE_NETS.check(addr, "ipv4");
+  if (fam === 6) return PRIVATE_NETS.check(addr, "ipv6");
+  return true; // not an IP → fail closed
+}
+
+/**
+ * dns.lookup-compatible wrapper that vets every address it hands back to the
+ * socket. Handles both single-address and `all: true` (happy-eyeballs) forms.
+ * Note: http.request skips `lookup` entirely for literal-IP hostnames, so
+ * requestOnce checks those separately before connecting.
+ */
+const ssrfLookup: net.LookupFunction = (hostname, options, callback) => {
+  dns.lookup(hostname, options, (err, result, family) => {
+    if (err) {
+      callback(err, result as never, family);
+      return;
+    }
+    const addrs: string[] = Array.isArray(result)
+      ? result.map((r) => r.address)
+      : [result as string];
+    const bad = addrs.find((a) => isPrivateAddress(a));
+    if (bad) {
+      callback(
+        new Error(
+          `fetch_url: ${hostname} resolved to private address ${bad}; refusing to connect`,
+        ),
+        result as never,
+        family,
+      );
+      return;
+    }
+    callback(null, result as never, family);
+  });
+};
+
+type RawResponse = {
+  status: number;
+  statusText: string;
+  contentType: string;
+  location: string | undefined;
+  body: string;
+  truncated: boolean;
+};
+
+function requestOnce(url: URL, signal: AbortSignal): Promise<RawResponse> {
+  const hostname = url.hostname.replace(/^\[|\]$/g, "");
+  if (net.isIP(hostname) && isPrivateAddress(hostname)) {
+    return Promise.reject(
+      new Error(`fetch_url: ${url.hostname} is a private address; refusing to connect`),
+    );
+  }
+  const mod = url.protocol === "https:" ? https : http;
+  return new Promise<RawResponse>((resolve, reject) => {
+    const req = mod.request(
+      url,
+      {
+        lookup: ssrfLookup,
+        signal,
+        headers: {
+          "user-agent": "sprite/0.1 (+https://github.com/anthropics)",
+          accept: "text/html,text/plain,application/json,*/*",
+        },
+      },
+      (res) => {
+        const chunks: Buffer[] = [];
+        let bytes = 0;
+        let truncated = false;
+        res.on("data", (chunk: Buffer) => {
+          chunks.push(chunk);
+          bytes += chunk.length;
+          if (bytes > FETCH_MAX_BYTES) {
+            truncated = true;
+            res.destroy();
+          }
+        });
+        const finish = () =>
+          resolve({
+            status: res.statusCode ?? 0,
+            statusText: res.statusMessage ?? "",
+            contentType: String(res.headers["content-type"] ?? ""),
+            location: res.headers.location,
+            body: Buffer.concat(chunks).toString("utf8"),
+            truncated,
+          });
+        res.on("end", finish);
+        res.on("close", finish); // destroyed mid-stream (byte cap) still resolves
+        res.on("error", reject);
+      },
+    );
+    req.on("error", reject);
+    req.end();
+  });
+}
 
 async function fetchUrl(url: string, signal?: AbortSignal): Promise<string> {
   signal?.throwIfAborted();
@@ -618,8 +788,8 @@ async function fetchUrl(url: string, signal?: AbortSignal): Promise<string> {
     );
   }
 
-  // One controller combines the caller's abort with our timeout, so the
-  // underlying fetch sees a single signal.
+  // One controller combines the caller's abort with our timeout, so every hop
+  // sees a single signal and the whole chain shares one deadline.
   const combined = new AbortController();
   const timer = setTimeout(
     () => combined.abort(new Error(`timeout after ${FETCH_TIMEOUT_MS / 1000}s`)),
@@ -629,34 +799,29 @@ async function fetchUrl(url: string, signal?: AbortSignal): Promise<string> {
   signal?.addEventListener("abort", onOuterAbort, { once: true });
 
   try {
-    const res = await fetch(url, {
-      signal: combined.signal,
-      redirect: "follow",
-      headers: { "user-agent": "sprite/0.1 (+https://github.com/anthropics)" },
-    });
-
-    // Stream the body so a server without content-length (chunked) can't
-    // balloon memory past the cap before capTail trims the output.
-    const chunks: Buffer[] = [];
-    let bytes = 0;
-    let truncated = false;
-    for await (const chunk of res.body ?? []) {
-      const buf = Buffer.from(chunk);
-      chunks.push(buf);
-      bytes += buf.length;
-      if (bytes > FETCH_MAX_BYTES) {
-        truncated = true;
-        break;
+    let current = new URL(url);
+    let res: RawResponse;
+    let hops = 0;
+    for (;;) {
+      res = await requestOnce(current, combined.signal);
+      const isRedirect =
+        res.status >= 300 && res.status < 400 && res.location != null;
+      if (!isRedirect) break;
+      if (++hops > FETCH_MAX_REDIRECTS) {
+        throw new Error(`fetch_url: too many redirects (>${FETCH_MAX_REDIRECTS})`);
       }
+      // Re-enter requestOnce with the new URL so the next hop gets the same
+      // literal-IP check and the same guarded lookup.
+      current = new URL(res.location!, current);
     }
-    const body = Buffer.concat(chunks).toString("utf8");
 
-    const ct = res.headers.get("content-type") || "";
-    const looksHtml = /\bhtml\b/i.test(ct) || /^\s*<(!doctype|html|head|body)/i.test(body);
-    const text = looksHtml ? htmlToText(body) : body;
+    const looksHtml =
+      /\bhtml\b/i.test(res.contentType) ||
+      /^\s*<(!doctype|html|head|body)/i.test(res.body);
+    const text = looksHtml ? htmlToText(res.body) : res.body;
 
-    const redirect = res.url !== url ? ` → ${res.url}` : "";
-    const note = truncated ? ` · body cut at ${FETCH_MAX_BYTES} bytes` : "";
+    const redirect = current.toString() !== url ? ` → ${current.toString()}` : "";
+    const note = res.truncated ? ` · body cut at ${FETCH_MAX_BYTES} bytes` : "";
     return `[${res.status} ${res.statusText} · ${url}${redirect}${note}]\n${text}`;
   } finally {
     clearTimeout(timer);

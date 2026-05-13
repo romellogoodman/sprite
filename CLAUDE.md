@@ -52,6 +52,8 @@ Two modes, cycled with shift+tab: `default` and `plan`. Plan mode refuses `edit_
 
 Bash is spawned with a narrow env whitelist by default (`SAFE_ENV_KEYS` in `tools.ts`) — PATH/HOME/locale/etc., no secrets. `--trust` or `SPRITE_FULL_ENV=1` forwards `process.env`; `SPRITE_EXPOSE_ENV=VAR1,VAR2` widens just those vars. Closes the "model runs `env | grep KEY`" and "approved-prefix with `$VAR` expansion" exfil paths.
 
+`read_file`/`list_files` are confined to the workspace like `edit_file`, symlink-aware (`assertReadable`). `fetch_url` refuses private/loopback/link-local addresses via a DNS-pinned lookup so the checked address is the connected address, re-applied on every redirect hop (`ssrfLookup`). Both escape hatches are `bash` — it has the confirmation gate. These close the "prompt injection in a cloned README reads `~/.ssh/` or hits the cloud metadata endpoint" exfil paths.
+
 ## Principles
 
 - Keep the loop small. Complexity belongs in tool implementations, not orchestration.
