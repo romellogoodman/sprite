@@ -1,4 +1,4 @@
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync, realpathSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import Anthropic from "@anthropic-ai/sdk";
@@ -78,6 +78,11 @@ Use ask_user_question when you hit a decision only the user can make (requiremen
 End your turn either by calling ask_user_question (to clarify) or exit_plan_mode (to request approval). Pass the full plan as markdown to exit_plan_mode; do not ask "is the plan ready?" via ask_user_question or prose — that's what exit_plan_mode is for. The plan should cover: what will change, which files, existing code to reuse (with paths), and how to verify.`;
 }
 
+function isInside(child: string, parent: string): boolean {
+  const rel = path.relative(parent, child);
+  return rel !== "" && !rel.startsWith("..") && !path.isAbsolute(rel);
+}
+
 /**
  * Load project instructions from AGENTS.md / AGENT.md / CLAUDE.md.
  *
@@ -85,17 +90,51 @@ End your turn either by calling ask_user_question (to clarify) or exit_plan_mode
  * cwd so inner files come last. Stops the upward walk at the first directory
  * containing `.git`, or at the filesystem root. Duplicate contents (e.g. via
  * symlinks) are included once. Missing files are skipped silently.
+ *
+ * Files found inside the repo are symlink-aware: realpath them and skip if
+ * they resolve outside the git root, so a cloned repo with
+ * `AGENTS.md -> /etc/passwd` can't pull arbitrary files into the system
+ * prompt. Files in ~/.config/sprite/ or above the git root are left alone —
+ * those are the user's own, and dotfile managers legitimately symlink them.
  */
 function loadProjectContext(cwd: string = process.cwd()): string {
   const names = ["AGENTS.md", "AGENT.md", "CLAUDE.md"];
   const seen = new Set<string>();
   const sections: string[] = [];
 
+  const home = os.homedir();
+  const ancestors: string[] = [];
+  let dir = path.resolve(cwd);
+  let gitRoot: string | null = null;
+  for (;;) {
+    ancestors.push(dir);
+    if (existsSync(path.join(dir, ".git"))) {
+      gitRoot = dir;
+      break;
+    }
+    const parent = path.dirname(dir);
+    if (parent === dir || dir === home) break;
+    dir = parent;
+  }
+  const repoReal = gitRoot
+    ? (() => {
+        try {
+          return realpathSync(gitRoot);
+        } catch {
+          return gitRoot;
+        }
+      })()
+    : null;
+
   const MAX = 32 * 1024;
-  const tryLoad = (dir: string) => {
+  const tryLoad = (dir: string, inRepo: boolean) => {
     for (const name of names) {
       try {
         const full = path.join(dir, name);
+        if (inRepo && repoReal) {
+          const real = realpathSync(full);
+          if (!isInside(real, repoReal) && real !== repoReal) continue;
+        }
         let body = readFileSync(full, "utf8").trim();
         if (!body || seen.has(body)) continue;
         seen.add(body);
@@ -107,19 +146,8 @@ function loadProjectContext(cwd: string = process.cwd()): string {
     }
   };
 
-  tryLoad(configDir());
-
-  const home = os.homedir();
-  const ancestors: string[] = [];
-  let dir = path.resolve(cwd);
-  for (;;) {
-    ancestors.push(dir);
-    if (existsSync(path.join(dir, ".git"))) break;
-    const parent = path.dirname(dir);
-    if (parent === dir || dir === home) break;
-    dir = parent;
-  }
-  for (const d of ancestors.reverse()) tryLoad(d);
+  tryLoad(configDir(), false);
+  for (const d of ancestors.reverse()) tryLoad(d, gitRoot != null);
 
   // Sprite's own scratch notes — what past sessions learned about this repo.
   // Loaded last so the human-curated instruction files above take priority
