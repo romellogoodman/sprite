@@ -33,12 +33,36 @@ export function loadNotes(cwd: string = process.cwd()): string {
   }
 }
 
+// Hard cap so a note stays a one-liner and can't quietly eat the context budget.
+const NOTE_MAX = 200;
+
+/**
+ * Collapse a model-proposed note to one line of printable text. Strips ANSI
+ * escape sequences and all C0/C1 control chars so what NoteConfirm renders is
+ * byte-for-byte what lands in the file — a `\r` or `ESC[K` can't hide part of
+ * the note from the approval prompt. The same function runs on the way to the
+ * display and the way to disk, so there's one definition of "clean."
+ */
+export function sanitizeNote(raw: string): string {
+  return raw
+    // CSI sequences ("\x1b[...m", "\x1b[2K", …) removed wholesale so the
+    // payload doesn't leave stray "[2K" garbage behind.
+    .replace(/\x1b\[[0-9;:?<=>]*[!-/]*[@-~]/g, "")
+    // Any remaining C0/C1 control char (lone ESC, CR, BS, DEL, 0x80-0x9f).
+    .replace(/[\x00-\x1f\x7f-\x9f]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, NOTE_MAX)
+    .trim();
+}
+
 /** Append a note as a bullet line. Creates the file and its directory lazily. */
 export function appendNote(note: string, cwd: string = process.cwd()): string {
+  const clean = sanitizeNote(note);
+  if (!clean) throw new Error("appendNote: note is empty after sanitization.");
   const file = notesPath(cwd);
   fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
-  const line = `- ${note.trim().replace(/\r?\n+/g, " ")}\n`;
-  fs.appendFileSync(file, line, { mode: 0o600 });
+  fs.appendFileSync(file, `- ${clean}\n`, { mode: 0o600 });
   return file;
 }
 

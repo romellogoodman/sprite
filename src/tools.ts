@@ -15,7 +15,7 @@ import {
   suggestBashPrefix,
 } from "./config.js";
 import { invalidateFileCache } from "./completion.js";
-import { appendNote } from "./session.js";
+import { appendNote, sanitizeNote } from "./session.js";
 
 /** The directory edits are confined to: the git root above cwd, or cwd itself. */
 function workspaceRoot(): string {
@@ -458,8 +458,13 @@ export async function executeTool(
       return formatAnswers(answers);
     }
     case "save_note": {
-      const note = String(input.note ?? "").trim();
-      if (!note) throw new Error("save_note: note is required.");
+      // Sanitize before confirmNote so the approval prompt renders exactly
+      // the bytes that will be written — no control chars that could hide
+      // part of the note from the user, no ANSI that could repaint the dialog.
+      const note = sanitizeNote(String(input.note ?? ""));
+      if (!note) {
+        throw new Error("save_note: note is empty (or was all control characters).");
+      }
       const approved = await ctx.confirmNote(note);
       if (!approved) {
         return "User declined to save the note. Don't retry; move on.";
