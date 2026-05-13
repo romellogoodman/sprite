@@ -14,6 +14,7 @@ import {
   allowBashPrefix,
   suggestBashPrefix,
 } from "./config.js";
+import { invalidateFileCache } from "./completion.js";
 
 /** The directory edits are confined to: the git root above cwd, or cwd itself. */
 function workspaceRoot(): string {
@@ -577,6 +578,9 @@ function editFile(relPath: string, edits: EditPair[]): string {
     }
     fs.mkdirSync(path.dirname(relPath), { recursive: true });
     fs.writeFileSync(relPath, edits[0].new_str, "utf8");
+    // The @-completion file walk is memoized; a new file is a mutation point,
+    // so bust it or the path never shows up in the picker this session.
+    invalidateFileCache();
     return `Created ${relPath}`;
   }
 

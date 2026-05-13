@@ -11,6 +11,15 @@ const SKIP_DIRS = new Set(["node_modules", "dist", "build", "coverage"]);
 
 let fileCache: string[] | null = null;
 
+/**
+ * Drop the memoized file list so the next @-completion re-walks the tree.
+ * Called from edit_file when a new file lands; bash-created files are a
+ * smaller gap and restarting sprite or /clear picks them up.
+ */
+export function invalidateFileCache(): void {
+  fileCache = null;
+}
+
 /** Recursive relative-path listing of cwd, skipping common junk dirs. */
 export function listProjectFiles(root: string = process.cwd()): string[] {
   if (fileCache) return fileCache;
