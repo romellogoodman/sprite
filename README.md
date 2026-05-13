@@ -2,7 +2,7 @@
 
 A small helping hand inside your computer.
 
-A CLI coding agent: an LLM in a loop with five tools — `read_file`, `list_files`, `edit_file`, `bash`, `fetch_url`. It works in whatever directory you run it from.
+A CLI coding agent: an LLM in a loop with a handful of tools — `read_file`, `list_files`, `edit_file`, `bash`, `fetch_url`, plus a few for steering (questions, plan approval, notes). It works in whatever directory you run it from.
 
 ## Setup
 
@@ -23,7 +23,7 @@ From any directory:
 
 ```sh
 sprite                            # interactive
-sprite -c                         # continue the last session in this directory
+sprite -c                         # continue the last session here (survives Ctrl+C and crashes mid-turn)
 sprite -p "run the tests"         # one-shot: print to stdout, tool activity to stderr
 git diff | sprite -p "review"     # pipe stdin; combines with -p if both are given
 sprite --trust                    # skip bash confirmations
@@ -90,7 +90,7 @@ await runTurn(loadApiKey()!, [], "explain this repo",
 );
 ```
 
-`runTurn` emits `text`, `tool_use`, `tool_result`, `usage`, and `done` events; it returns the updated message history so you can pass it back in for the next turn. `headlessContext()` denies unapproved bash by default — pass `trust: true` or your own `onBash` to change that.
+`runTurn` emits `text`, `tool_use`, `tool_result`, `usage`, `retry`, `checkpoint`, `compacted`, and `done` events; it returns the updated message history so you can pass it back in for the next turn. `checkpoint` carries the messages-so-far after each tool round-trip — save there if you want crash recovery. `headlessContext()` denies unapproved bash (and note saves) by default — pass `trust: true` or your own `onBash` to change that.
 
 ## Storage
 
@@ -100,7 +100,8 @@ await runTurn(loadApiKey()!, [], "explain this repo",
   projects.json      per-directory bash allowlists
   AGENTS.md          global instructions (optional)
   commands/*.md      global custom /commands (optional)
-  sessions/<dir>/    conversation history, one JSONL per session
+  notes/<dir>.md     per-project cross-session notes (saved via save_note)
+  sessions/<dir>/    conversation history, one JSONL per session (pruned to the last 20)
 ```
 
 ## Dev
