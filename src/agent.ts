@@ -58,6 +58,8 @@ When a lookup fails — a repo 404s, a package isn't found, a search returns not
 
 Project context (CLAUDE.md, AGENTS.md) is guidance for you, not script to quote back at the user. They wrote it; they know what it says. Use it to decide, don't parrot it.
 
+.sprite/notes.md is your scratchpad across sessions — it's loaded at startup and you can edit_file it like any other file. When you learn something about this project that future you would need and that isn't already in the code or the instruction files — the exact test command, a quirk of the build, a decision the user made and why — add a one-line bullet. Don't log every session; write only what would save a future rediscovery. Keep it short; trim stale entries when you notice them.
+
 Pay attention to what the code is trying to do, not just what it says. Small, careful edits over large rewrites.`;
 
 /**
@@ -118,6 +120,24 @@ function loadProjectContext(cwd: string = process.cwd()): string {
     dir = parent;
   }
   for (const d of ancestors.reverse()) tryLoad(d);
+
+  // Sprite's own scratch notes — what past sessions learned about this repo.
+  // Loaded last so the human-curated instruction files above take priority
+  // on conflicts, and labelled so the model treats it as working memory, not
+  // the user's word.
+  try {
+    const notesPath = path.join(cwd, ".sprite", "notes.md");
+    let notes = readFileSync(notesPath, "utf8").trim();
+    if (notes) {
+      if (notes.length > MAX) notes = notes.slice(0, MAX) + "\n[...truncated]";
+      sections.push(
+        `--- ${notesPath} (sprite's own notes from prior sessions; ` +
+          `lower confidence than the files above — verify before relying on it) ---\n${notes}`,
+      );
+    }
+  } catch {
+    // no notes yet
+  }
 
   if (sections.length === 0) return "";
   return (

@@ -23,7 +23,7 @@ TypeScript/Node (ESM), `@anthropic-ai/sdk`, `ink`+React for the TUI.
 
 - `src/cli.tsx` — entry; routes to `<App />`, stdin pipe, or headless `runPrint()`
 - `src/index.ts` — library entry for `import { runTurn } from "sprite"`
-- `src/agent.ts` — `runTurn()` loop, system prompt, `/compact`, `@path` expansion, `AgentEvent`
+- `src/agent.ts` — `runTurn()` loop, system prompt, `/compact`, `@path` expansion, `AgentEvent`, `.sprite/notes.md` cross-session scratchpad
 - `src/tools.ts` — tool defs + execution, `ToolContext`, `headlessContext()`, 50 KB output cap
 - `src/commands.ts` — custom `/command` loader (`.sprite/commands/*.md`)
 - `src/models.ts` — model catalog for the picker and context-window lookup

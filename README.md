@@ -63,11 +63,13 @@ Drop a markdown file in `./.sprite/commands/` (project) or `~/.config/sprite/com
 
 sprite reads `AGENTS.md`, `AGENT.md`, and `CLAUDE.md` from the current directory, every parent up to the git root, and `~/.config/sprite/` (global). Whatever it finds is appended to the system prompt, so you can tell it how your project works once and it'll remember.
 
+It also reads `.sprite/notes.md` if present — sprite's own scratchpad. The model can write learnings there (the exact test command, a build quirk, a decision and why) and they persist across sessions. It's a plain markdown file: check it in if the notes are worth sharing, gitignore it if not, delete it to start fresh.
+
 ## Permissions
 
 Shell commands prompt for confirmation before running. Choosing "always" remembers the command prefix for this project (stored in `~/.config/sprite/projects.json`, keyed by directory so a cloned repo can't pre-seed its own allowlist). Commands containing shell operators (`;`, `|`, `$(` …) always prompt. `--trust` skips all of it.
 
-Edits are confined to the git root (or cwd if there isn't one); paths outside it are refused.
+Reads and edits are confined to the git root (or cwd if there isn't one); paths outside it are refused. `fetch_url` refuses private/local addresses. Both escape hatches are `bash`, which has the confirmation gate.
 
 Bash runs with a narrowed environment by default — `PATH`, `HOME`, `USER`, `SHELL`, locale, `TZ`, `TERM`, temp-dir vars. Project secrets in your shell (`ANTHROPIC_API_KEY`, `*_TOKEN`, `DATABASE_URL`, etc.) aren't forwarded, so the model can't exfiltrate them by running `env` or expanding `$VAR` inside an approved command. Widen as needed:
 
