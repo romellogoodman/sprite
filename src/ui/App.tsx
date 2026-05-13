@@ -252,6 +252,10 @@ export function App({
       setContextUsed(0);
     } else if (e.type === "retry") {
       setPhrase(`retrying (${e.attempt}/3) in ${Math.round(e.delayMs / 1000)}s`);
+    } else if (e.type === "checkpoint") {
+      // Snapshot mid-turn so a crash or Ctrl+C doesn't lose the tool work
+      // already done; the final save after runTurn returns overwrites this.
+      session.save(e.messages);
     } else if (e.type === "tool_result") {
       setLines((prev) =>
         prev.map((l) =>

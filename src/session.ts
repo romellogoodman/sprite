@@ -48,8 +48,9 @@ export function loadLastSession(cwd: string = process.cwd()): Anthropic.MessageP
   }
   const last = files[files.length - 1];
   if (!last) return [];
+  let messages: Anthropic.MessageParam[];
   try {
-    return fs
+    messages = fs
       .readFileSync(path.join(dir, last), "utf8")
       .split("\n")
       .filter(Boolean)
@@ -57,4 +58,15 @@ export function loadLastSession(cwd: string = process.cwd()): Anthropic.MessageP
   } catch {
     return [];
   }
+  // A mid-turn checkpoint can leave the file ending on a tool_result batch
+  // (role: user, array content). The API requires roles to alternate, so
+  // close the interrupted turn rather than dropping the tool work.
+  const tail = messages[messages.length - 1];
+  if (tail?.role === "user" && Array.isArray(tail.content)) {
+    messages.push({
+      role: "assistant",
+      content: "(session was interrupted mid-turn and resumed)",
+    });
+  }
+  return messages;
 }

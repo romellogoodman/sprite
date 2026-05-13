@@ -188,6 +188,9 @@ export type AgentEvent =
   | { type: "usage"; input: number; output: number }
   | { type: "compacted"; before: number; after: number; pct: number }
   | { type: "retry"; attempt: number; delayMs: number; reason: string }
+  /** Fires after each tool round-trip with the messages so far. Save here so a
+   * crash or Ctrl+C mid-turn doesn't lose the tool work already done. */
+  | { type: "checkpoint"; messages: Anthropic.MessageParam[] }
   | { type: "done"; durationMs: number; input: number; output: number };
 
 /**
@@ -464,6 +467,7 @@ export async function runTurn(
     }
 
     messages.push({ role: "user", content: toolResults });
+    onEvent({ type: "checkpoint", messages });
 
     // Safety net: if the conversation is nearing the context limit, compact
     // before the next model call. /compact is still the preferred path so
