@@ -41,6 +41,10 @@ export async function runPrint(prompt: string, trust: boolean): Promise<void> {
       } else if (e.type === "tool_result") {
         const mark = e.isError ? "✗" : "✓";
         process.stderr.write(`${mark} ${e.name}\n`);
+      } else if (e.type === "retry") {
+        process.stderr.write(
+          `⟳ retrying (${e.attempt}) in ${Math.round(e.delayMs / 1000)}s — ${e.reason}\n`,
+        );
       } else if (e.type === "done") {
         const s = (e.durationMs / 1000).toFixed(1);
         process.stderr.write(`✓ done ${s}s · ${e.input} in / ${e.output} out\n`);

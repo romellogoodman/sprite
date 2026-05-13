@@ -250,6 +250,8 @@ export function App({
         text: `(auto-compacted at ${e.pct}% — ${e.before} → ${e.after} messages, recent turns kept verbatim)`,
       });
       setContextUsed(0);
+    } else if (e.type === "retry") {
+      setPhrase(`retrying (${e.attempt}/3) in ${Math.round(e.delayMs / 1000)}s`);
     } else if (e.type === "tool_result") {
       setLines((prev) =>
         prev.map((l) =>

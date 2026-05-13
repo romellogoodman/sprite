@@ -185,7 +185,66 @@ export type AgentEvent =
   | { type: "tool_result"; id: string; name: string; output: string; isError: boolean }
   | { type: "usage"; input: number; output: number }
   | { type: "compacted"; before: number; after: number; pct: number }
+  | { type: "retry"; attempt: number; delayMs: number; reason: string }
   | { type: "done"; durationMs: number; input: number; output: number };
+
+/**
+ * Transient API failures — rate limits, overload, 5xx, dropped sockets — are
+ * worth one or two retries before throwing the whole turn away. Anything else
+ * (400 bad request, 401 auth) fails fast.
+ */
+function isTransient(err: unknown): boolean {
+  if (err instanceof Anthropic.APIConnectionError) return true;
+  if (err instanceof Anthropic.APIError) {
+    const s = err.status;
+    return s === 429 || s === 529 || (typeof s === "number" && s >= 500);
+  }
+  return false;
+}
+
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) return reject(signal.reason ?? new Error("aborted"));
+    const t = setTimeout(resolve, ms);
+    signal?.addEventListener(
+      "abort",
+      () => {
+        clearTimeout(t);
+        reject(signal.reason ?? new Error("aborted"));
+      },
+      { once: true },
+    );
+  });
+}
+
+const RETRY_DELAYS_MS = [1_000, 3_000, 8_000];
+
+/**
+ * Run `fn`, retrying on transient API errors with short backoff. `canRetry`
+ * gates it — the caller flips it false once content has streamed to the UI, so
+ * a mid-stream failure surfaces as an error instead of a duplicated response.
+ */
+async function withRetry<T>(
+  fn: () => Promise<T>,
+  canRetry: () => boolean,
+  onRetry: (attempt: number, delayMs: number, reason: string) => void,
+  signal?: AbortSignal,
+): Promise<T> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      if (signal?.aborted) throw err;
+      if (attempt >= RETRY_DELAYS_MS.length || !canRetry() || !isTransient(err)) {
+        throw err;
+      }
+      const delay = RETRY_DELAYS_MS[attempt];
+      const reason = err instanceof Error ? err.message : String(err);
+      onRetry(attempt + 1, delay, reason);
+      await sleep(delay, signal);
+    }
+  }
+}
 
 /** Rough token count. Good enough to decide where to cut; not for billing. */
 function estimateTokens(m: Anthropic.MessageParam): number {
@@ -294,22 +353,36 @@ export async function runTurn(
 
   while (true) {
     signal?.throwIfAborted();
-    const stream = client.messages.stream(
-      {
-        model: model(),
-        max_tokens: 16000,
-        ...modelParams(),
-        cache_control: { type: "ephemeral" },
-        system,
-        tools: toolsForMode(ctx.getMode()),
-        messages,
+
+    // Don't retry once content has streamed to the UI — a second stream would
+    // append on top of the partial text. Connect-time failures (429/529/5xx)
+    // land here before any delta, which is the common case worth saving.
+    let streamedAny = false;
+    const response = await withRetry(
+      async () => {
+        const stream = client.messages.stream(
+          {
+            model: model(),
+            max_tokens: 16000,
+            ...modelParams(),
+            cache_control: { type: "ephemeral" },
+            system,
+            tools: toolsForMode(ctx.getMode()),
+            messages,
+          },
+          { signal },
+        );
+        stream.on("text", (delta) => {
+          streamedAny = true;
+          onEvent({ type: "text", text: delta });
+        });
+        return await stream.finalMessage();
       },
-      { signal },
+      () => !streamedAny,
+      (attempt, delayMs, reason) =>
+        onEvent({ type: "retry", attempt, delayMs, reason }),
+      signal,
     );
-
-    stream.on("text", (delta) => onEvent({ type: "text", text: delta }));
-
-    const response = await stream.finalMessage();
 
     const inputTokens =
       (response.usage.input_tokens ?? 0) +
