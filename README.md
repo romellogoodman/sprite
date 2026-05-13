@@ -63,7 +63,7 @@ Drop a markdown file in `./.sprite/commands/` (project) or `~/.config/sprite/com
 
 sprite reads `AGENTS.md`, `AGENT.md`, and `CLAUDE.md` from the current directory, every parent up to the git root, and `~/.config/sprite/` (global). Whatever it finds is appended to the system prompt, so you can tell it how your project works once and it'll remember.
 
-It also reads `.sprite/notes.md` if present — sprite's own scratchpad. The model can write learnings there (the exact test command, a build quirk, a decision and why) and they persist across sessions. It's a plain markdown file: check it in if the notes are worth sharing, gitignore it if not, delete it to start fresh.
+It also loads sprite's own per-project notes from `~/.config/sprite/notes/` — learnings from past sessions (the exact test command, a build quirk, a decision and why). The model saves them via `save_note`, which prompts you to approve each one before it lands. They live outside the repo so a clone can't pre-seed them and the model can't write them without you seeing it. Delete the file to start fresh.
 
 ## Permissions
 

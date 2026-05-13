@@ -22,6 +22,7 @@ import { PromptInput } from "./PromptInput.js";
 import { Header } from "./Header.js";
 import { Line, type DisplayLine } from "./Line.js";
 import { BashConfirm } from "./BashConfirm.js";
+import { NoteConfirm } from "./NoteConfirm.js";
 import { ModelPicker } from "./ModelPicker.js";
 import { Login } from "./Login.js";
 import { QuestionPrompt } from "./QuestionPrompt.js";
@@ -38,6 +39,10 @@ type PendingQuestion = {
 type PendingPlan = {
   plan: string;
   resolve: (d: PlanDecision) => void;
+};
+type PendingNote = {
+  note: string;
+  resolve: (approved: boolean) => void;
 };
 
 export function App({
@@ -90,6 +95,7 @@ export function App({
   const [pendingQuestion, setPendingQuestion] =
     useState<PendingQuestion | null>(null);
   const [pendingPlan, setPendingPlan] = useState<PendingPlan | null>(null);
+  const [pendingNote, setPendingNote] = useState<PendingNote | null>(null);
   const [mode, setModeState] = useState<PermissionMode>("default");
   const modeRef = useRef<PermissionMode>("default");
   const setMode = (m: PermissionMode) => {
@@ -128,6 +134,10 @@ export function App({
       new Promise<PlanDecision>((resolve) => {
         setPendingPlan({ plan, resolve });
       }),
+    confirmNote: (note) =>
+      new Promise<boolean>((resolve) => {
+        setPendingNote({ note, resolve });
+      }),
   }).current;
 
   useInput((ch, key) => {
@@ -161,6 +171,11 @@ export function App({
         const { resolve } = pendingPlan;
         setPendingPlan(null);
         resolve({ approved: false, feedback: "user cancelled" });
+      }
+      if (pendingNote) {
+        const { resolve } = pendingNote;
+        setPendingNote(null);
+        resolve(false);
       }
     }
   });
@@ -212,6 +227,19 @@ export function App({
       }
     },
     { isActive: pendingBash !== null },
+  );
+
+  useInput(
+    (ch) => {
+      if (!pendingNote) return;
+      const c = ch.toLowerCase();
+      if (c === "y" || c === "n") {
+        const { resolve } = pendingNote;
+        setPendingNote(null);
+        resolve(c === "y");
+      }
+    },
+    { isActive: pendingNote !== null },
   );
 
   if (!apiKey) {
@@ -456,6 +484,8 @@ export function App({
 
       {pendingBash ? (
         <BashConfirm command={pendingBash.command} />
+      ) : pendingNote ? (
+        <NoteConfirm note={pendingNote.note} />
       ) : pendingQuestion ? (
         <QuestionPrompt
           questions={pendingQuestion.questions}

@@ -14,6 +14,34 @@ function sessionDir(cwd: string): string {
   return path.join(configDir(), "sessions", cwdSlug(cwd));
 }
 
+// --- per-project notes ---
+// Lives in the user config dir, not the repo, so a cloned repo can't pre-seed
+// it and edit_file (which refuses the config dir) can't reach it. Writes go
+// through the save_note tool, which prompts for approval.
+
+/** Path to this project's notes file. Keyed by absolute cwd like the bash allowlist. */
+export function notesPath(cwd: string = process.cwd()): string {
+  return path.join(configDir(), "notes", `${cwdSlug(cwd)}.md`);
+}
+
+/** Read this project's notes, or "" if none. */
+export function loadNotes(cwd: string = process.cwd()): string {
+  try {
+    return fs.readFileSync(notesPath(cwd), "utf8").trim();
+  } catch {
+    return "";
+  }
+}
+
+/** Append a note as a bullet line. Creates the file and its directory lazily. */
+export function appendNote(note: string, cwd: string = process.cwd()): string {
+  const file = notesPath(cwd);
+  fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+  const line = `- ${note.trim().replace(/\r?\n+/g, " ")}\n`;
+  fs.appendFileSync(file, line, { mode: 0o600 });
+  return file;
+}
+
 export type Session = {
   file: string;
   save: (history: Anthropic.MessageParam[]) => void;

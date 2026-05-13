@@ -9,6 +9,7 @@ import {
   type ToolContext,
 } from "./tools.js";
 import { configDir } from "./config.js";
+import { loadNotes, notesPath } from "./session.js";
 import { findModel } from "./models.js";
 
 const DEFAULT_MODEL = "claude-haiku-4-5";
@@ -58,7 +59,7 @@ When a lookup fails — a repo 404s, a package isn't found, a search returns not
 
 Project context (CLAUDE.md, AGENTS.md) is guidance for you, not script to quote back at the user. They wrote it; they know what it says. Use it to decide, don't parrot it.
 
-.sprite/notes.md is your scratchpad across sessions — it's loaded at startup and you can edit_file it like any other file. When you learn something about this project that future you would need and that isn't already in the code or the instruction files — the exact test command, a quirk of the build, a decision the user made and why — add a one-line bullet. Don't log every session; write only what would save a future rediscovery. Keep it short; trim stale entries when you notice them.
+save_note is your scratchpad across sessions. When you learn something about this project that future you would need and that isn't already in the code or the instruction files — the exact test command, a quirk of the build, a decision the user made and why — call save_note with a one-line summary. The user sees and approves every note, so keep them short and factual. Don't log every session; save only what would spare a future rediscovery.
 
 Pay attention to what the code is trying to do, not just what it says. Small, careful edits over large rewrites.`;
 
@@ -150,21 +151,17 @@ function loadProjectContext(cwd: string = process.cwd()): string {
   for (const d of ancestors.reverse()) tryLoad(d, gitRoot != null);
 
   // Sprite's own scratch notes — what past sessions learned about this repo.
-  // Loaded last so the human-curated instruction files above take priority
-  // on conflicts, and labelled so the model treats it as working memory, not
-  // the user's word.
-  try {
-    const notesPath = path.join(cwd, ".sprite", "notes.md");
-    let notes = readFileSync(notesPath, "utf8").trim();
-    if (notes) {
-      if (notes.length > MAX) notes = notes.slice(0, MAX) + "\n[...truncated]";
-      sections.push(
-        `--- ${notesPath} (sprite's own notes from prior sessions; ` +
-          `lower confidence than the files above — verify before relying on it) ---\n${notes}`,
-      );
-    }
-  } catch {
-    // no notes yet
+  // Stored under ~/.config/sprite/notes/, not the repo: edit_file refuses the
+  // config dir and a cloned repo can't pre-seed it, so the only write path is
+  // the save_note tool, which prompts for approval. Loaded last and labelled
+  // so the human-curated instruction files above take priority on conflicts.
+  let notes = loadNotes(cwd);
+  if (notes) {
+    if (notes.length > MAX) notes = notes.slice(0, MAX) + "\n[...truncated]";
+    sections.push(
+      `--- ${notesPath(cwd)} (sprite's own notes from prior sessions, saved via save_note; ` +
+        `lower confidence than the files above — verify before relying on it) ---\n${notes}`,
+    );
   }
 
   if (sections.length === 0) return "";

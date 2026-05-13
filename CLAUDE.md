@@ -23,12 +23,12 @@ TypeScript/Node (ESM), `@anthropic-ai/sdk`, `ink`+React for the TUI.
 
 - `src/cli.tsx` — entry; routes to `<App />`, stdin pipe, or headless `runPrint()`
 - `src/index.ts` — library entry for `import { runTurn } from "sprite"`
-- `src/agent.ts` — `runTurn()` loop, system prompt, `/compact`, `@path` expansion, `AgentEvent`, `.sprite/notes.md` cross-session scratchpad
+- `src/agent.ts` — `runTurn()` loop, system prompt, `/compact`, `@path` expansion, `AgentEvent`
 - `src/tools.ts` — tool defs + execution, `ToolContext`, `headlessContext()`, 50 KB output cap
 - `src/commands.ts` — custom `/command` loader (`.sprite/commands/*.md`)
 - `src/models.ts` — model catalog for the picker and context-window lookup
 - `src/print.ts` — `-p` one-shot mode
-- `src/session.ts` — JSONL persistence under `~/.config/sprite/sessions/`
+- `src/session.ts` — JSONL persistence under `~/.config/sprite/sessions/`, cross-session notes under `~/.config/sprite/notes/`
 - `src/config.ts` — API key + per-project bash allowlist
 - `src/completion.ts`, `src/poem.ts` — typeahead matches, spinner phrases
 - `src/ui/` — Ink/React components
@@ -36,13 +36,13 @@ TypeScript/Node (ESM), `@anthropic-ai/sdk`, `ink`+React for the TUI.
   - `Line.tsx` — renders one transcript row; owns `DisplayLine`
   - `Markdown.tsx` — marked→Ink renderer for assistant text
   - `PromptInput.tsx` — input: cursor, history, bracketed paste
-  - `Header.tsx`, `BashConfirm.tsx`, `Login.tsx`, `ModelPicker.tsx`, `QuestionPrompt.tsx`, `PlanApproval.tsx`
+  - `Header.tsx`, `BashConfirm.tsx`, `NoteConfirm.tsx`, `Login.tsx`, `ModelPicker.tsx`, `QuestionPrompt.tsx`, `PlanApproval.tsx`
 
 See README.md for user-facing flags and commands.
 
 ## Tools
 
-Capability tools: `read_file`, `list_files`, `edit_file`, `bash`, `fetch_url`. Control-flow tools: `ask_user_question` (multi-choice, always available), `exit_plan_mode` (plan mode only). Keep the capability set small — additions need a real reason, not just convenience. Most new capabilities should go through `bash` or a script the model writes. Evaluate proposals on their merits; don't refuse reflexively.
+Capability tools: `read_file`, `list_files`, `edit_file`, `bash`, `fetch_url`. Control-flow tools: `ask_user_question` (multi-choice, always available), `exit_plan_mode` (plan mode only), `save_note` (confirmation-gated; writes to `~/.config/sprite/notes/` so `edit_file` can't reach it and a cloned repo can't pre-seed it). Keep the capability set small — additions need a real reason, not just convenience. Most new capabilities should go through `bash` or a script the model writes. Evaluate proposals on their merits; don't refuse reflexively.
 
 ## Permissions
 

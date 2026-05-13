@@ -15,6 +15,7 @@ import {
   suggestBashPrefix,
 } from "./config.js";
 import { invalidateFileCache } from "./completion.js";
+import { appendNote } from "./session.js";
 
 /** The directory edits are confined to: the git root above cwd, or cwd itself. */
 function workspaceRoot(): string {
@@ -280,6 +281,22 @@ const ALL_TOOLS: Anthropic.Tool[] = [
     },
   },
   {
+    name: "save_note",
+    description:
+      "Persist a short fact about this project so future sessions don't have to rediscover it — the exact test command, a build quirk, a decision the user made and why. Notes are loaded into your context at startup. The user sees and approves every note before it's saved, so keep it to one factual line; don't use this to log progress or narrate what you did.",
+    input_schema: {
+      type: "object",
+      properties: {
+        note: {
+          type: "string",
+          description:
+            "One line, under ~120 chars. State the fact, not the story. e.g. 'tests run with `npm test -- --run`; plain `npm test` watches.'",
+        },
+      },
+      required: ["note"],
+    },
+  },
+  {
     name: "exit_plan_mode",
     description:
       "Call this when you are in plan mode and the plan is ready for user approval. Pass the full plan as markdown in the `plan` argument; the user will see it and approve or reject. On approval, plan mode ends and you can make edits. On rejection, you stay in plan mode and the user's feedback comes back as the tool result. Do NOT use ask_user_question to ask 'is the plan ready?' — that's exactly what this tool is for. Only available in plan mode.",
@@ -372,6 +389,8 @@ export type ToolContext = {
   askQuestion: (questions: Question[]) => Promise<QuestionAnswer[]>;
   /** Show a plan and resolve with approval or rejection feedback. */
   approvePlan: (plan: string) => Promise<PlanDecision>;
+  /** Ask the user to approve saving a cross-session note. */
+  confirmNote: (note: string) => Promise<boolean>;
 };
 
 /**
@@ -394,6 +413,7 @@ export function headlessContext(opts?: {
       approved: false,
       feedback: "headless mode; plan approval unavailable",
     }),
+    confirmNote: async () => false,
   };
 }
 
@@ -437,6 +457,16 @@ export async function executeTool(
       const answers = await ctx.askQuestion(questions);
       return formatAnswers(answers);
     }
+    case "save_note": {
+      const note = String(input.note ?? "").trim();
+      if (!note) throw new Error("save_note: note is required.");
+      const approved = await ctx.confirmNote(note);
+      if (!approved) {
+        return "User declined to save the note. Don't retry; move on.";
+      }
+      const file = appendNote(note);
+      return `Saved to ${file}. It'll be loaded on future sessions in this project.`;
+    }
     case "exit_plan_mode": {
       if (ctx.getMode() !== "plan") {
         return "Refused: exit_plan_mode can only be called while plan mode is active.";
@@ -471,6 +501,8 @@ export function summarizeInput(name: string, input: unknown): string {
       const qs = o?.questions as Question[] | undefined;
       return qs?.[0]?.header ?? "";
     }
+    case "save_note":
+      return String(o?.note ?? "");
     case "exit_plan_mode":
       return "(plan)";
     default:
