@@ -355,6 +355,7 @@ export async function runTurn(
   const started = Date.now();
   let totalIn = 0;
   let totalOut = 0;
+  let autoCompacted = false;
 
   while (true) {
     signal?.throwIfAborted();
@@ -472,11 +473,24 @@ export async function runTurn(
     // Safety net: if the conversation is nearing the context limit, compact
     // before the next model call. /compact is still the preferred path so
     // the user can pick the moment; this just stops us hitting the wall.
-    if (inputTokens > window * 0.85) {
+    //
+    // At most once per turn. If a single turn's tool results exceed the
+    // budget on their own, compaction keeps the tail verbatim and re-fires
+    // on the very next call — burning a summarization request each loop for
+    // nothing. Better to compact once and let the API surface the limit; the
+    // user can /compact or /clear from there. A compaction failure also
+    // shouldn't throw away the tool work already done — surface the API
+    // error on the real call instead.
+    if (!autoCompacted && inputTokens > window * 0.85) {
+      autoCompacted = true;
       const before = messages.length;
       const pct = Math.round((100 * inputTokens) / window);
-      messages = await compactHistory(apiKey, messages);
-      onEvent({ type: "compacted", before, after: messages.length, pct });
+      try {
+        messages = await compactHistory(apiKey, messages);
+        onEvent({ type: "compacted", before, after: messages.length, pct });
+      } catch {
+        // best effort; keep going with the uncompacted history
+      }
     }
   }
 }
