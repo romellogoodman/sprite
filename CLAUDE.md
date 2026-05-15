@@ -32,11 +32,12 @@ TypeScript/Node (ESM), `@anthropic-ai/sdk`, `ink`+React for the TUI.
 - `src/config.ts` — API key + per-project bash allowlist
 - `src/completion.ts`, `src/poem.ts` — typeahead matches, spinner phrases
 - `src/ui/` — Ink/React components
-  - `App.tsx` — top-level state, slash commands, event loop wiring
+  - `App.tsx` — top-level state, slash commands, event loop wiring; owns the single `accent` color shared by the prompt caret and the status line below the input (renders "plan mode" and, only at 60%+, context %; always one row so it can't jump the layout)
   - `Line.tsx` — renders one transcript row; owns `DisplayLine`
   - `Markdown.tsx` — marked→Ink renderer for assistant text
   - `PromptInput.tsx` — input: cursor, history, bracketed paste
-  - `Header.tsx`, `BashConfirm.tsx`, `NoteConfirm.tsx`, `Login.tsx`, `ModelPicker.tsx`, `QuestionPrompt.tsx`, `PlanApproval.tsx`
+  - `Header.tsx` — frozen masthead, no live props. Rendered once as item 0 of the transcript `<Static>` so it prints at the top and scrolls away. Do NOT add live state here (context %, mode) — Ink would repaint it every turn and it'd walk down the page; live status belongs in `App.tsx` below the input
+  - `BashConfirm.tsx`, `NoteConfirm.tsx`, `Login.tsx`, `ModelPicker.tsx`, `QuestionPrompt.tsx`, `PlanApproval.tsx`
 
 See README.md for user-facing flags and commands.
 
