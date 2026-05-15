@@ -11,7 +11,8 @@
   "scripts": {
     "start": "tsx src/cli.tsx",
     "dev": "tsx watch src/cli.tsx",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test src/tools.test.ts src/config.test.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "0.95.0",

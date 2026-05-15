@@ -82,11 +82,20 @@ function writeProjects(p: ProjectsFile): void {
 // confirmation so an allowed prefix can't be chained into something else.
 const SHELL_META = /[;&|`<>\n]|\$\(/;
 
-export function isBashAllowed(command: string): boolean {
+/**
+ * `allow` is injectable for tests. In the real call path it's read from the
+ * per-project entry in projects.json; tests pass their own list to avoid
+ * touching ~/.config.
+ */
+export function isBashAllowed(
+  command: string,
+  allow?: readonly string[],
+): boolean {
   if (SHELL_META.test(command)) return false;
   const cmd = command.trim();
-  const allow = readProjects()[projectKey()]?.allowBash ?? [];
-  return allow.some((p) => {
+  const prefixes =
+    allow ?? readProjects()[projectKey()]?.allowBash ?? [];
+  return prefixes.some((p) => {
     const prefix = p.trim();
     if (!prefix) return false;
     return cmd === prefix || cmd.startsWith(prefix + " ");

@@ -554,7 +554,7 @@ const SAFE_ENV_KEYS = [
   "TEMP",
 ] as const;
 
-function resolveBashEnv(trust: boolean): NodeJS.ProcessEnv {
+export function resolveBashEnv(trust: boolean): NodeJS.ProcessEnv {
   if (trust || process.env.SPRITE_FULL_ENV === "1") return process.env;
   const env: NodeJS.ProcessEnv = {};
   for (const k of SAFE_ENV_KEYS) {
