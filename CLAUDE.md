@@ -47,9 +47,11 @@ Capability tools: `read_file`, `list_files`, `edit_file`, `bash`, `fetch_url`. C
 
 ## Permissions
 
-Two modes, cycled with shift+tab: `default` and `plan`. Plan mode refuses `edit_file` and non-read-only `bash`; the turn ends with `exit_plan_mode(plan)` which prompts for approval and drops back to `default`. The mode is read live via `ctx.getMode()` so mid-turn flips apply to the next tool call.
+Three modes, cycled with shift+tab (`default → plan → auto`): the caret stays `❯`; the mode reads from the accent color (cyan/magenta/green) and the status line. Plan mode refuses `edit_file` and non-read-only `bash`; the turn ends with `exit_plan_mode(plan)` which prompts for approval and drops back to `default`. The mode is read live via `ctx.getMode()` so mid-turn flips apply to the next tool call. `modeReminder` injects a plan-mode notice for the model; `auto` injects nothing — the model never learns it's in auto mode, because auto only changes execution gating, not what the model should do.
 
 `bash` prompts for confirmation; "always" saves a prefix to `~/.config/sprite/projects.json` keyed by absolute cwd (so a cloned repo can't pre-seed its own allowlist). Commands with shell operators always prompt. `--trust` skips it all. When touching this path, err toward more confirmation, not less.
+
+Auto mode (`classifyCommand` in `agent.ts`, wired as `ctx.classifyBash`) trades the bash prompt for a classifier: for a command that isn't `--trust`'d or already allowlisted, one pinned-haiku call judges it irreversible/destructive/exfiltrating. Safe → runs silently; flagged → falls back to the normal confirmation prompt carrying the reason (never a silent run, never a hard refusal). Missing/failed/unparseable classifier ⇒ flagged, so it degrades toward the human. The classifier reads the same project context (`loadProjectContext`) the main loop does, so a "never force-push" line in CLAUDE.md steers it too. Headless (`headlessContext`) pins mode to `default`, so auto is a TUI-only path today.
 
 Bash is spawned with a narrow env whitelist by default (`SAFE_ENV_KEYS` in `tools.ts`) — PATH/HOME/locale/etc., no secrets. `--trust` or `SPRITE_FULL_ENV=1` forwards `process.env`; `SPRITE_EXPOSE_ENV=VAR1,VAR2` widens just those vars. Closes the "model runs `env | grep KEY`" and "approved-prefix with `$VAR` expansion" exfil paths.
 

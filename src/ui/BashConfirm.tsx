@@ -1,7 +1,13 @@
 import { Box, Text } from "ink";
 import { suggestBashPrefix } from "../config.js";
 
-export function BashConfirm({ command }: { command: string }) {
+export function BashConfirm({
+  command,
+  reason,
+}: {
+  command: string;
+  reason?: string;
+}) {
   const prefix = suggestBashPrefix(command);
   return (
     <Box
@@ -10,6 +16,12 @@ export function BashConfirm({ command }: { command: string }) {
       borderColor="yellow"
       paddingX={1}
     >
+      {reason && (
+        <Box marginBottom={1}>
+          <Text color="yellow">⚠ auto mode flagged this: </Text>
+          <Text>{reason}</Text>
+        </Box>
+      )}
       <Text>
         sprite wants to run: <Text color="yellow">{command}</Text>
       </Text>

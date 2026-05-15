@@ -87,7 +87,7 @@ function assertReadable(relPath: string): string {
   return abs;
 }
 
-export type PermissionMode = "default" | "plan";
+export type PermissionMode = "default" | "plan" | "auto";
 
 export type QuestionOption = { label: string; description: string };
 export type Question = {
@@ -383,8 +383,20 @@ export type ToolContext = {
   getMode: () => PermissionMode;
   /** Flip mode from tool side (used by exit_plan_mode on approval). */
   setMode: (m: PermissionMode) => void;
-  /** Ask the user to approve a bash command. Returns their choice. */
-  confirmBash: (command: string) => Promise<BashApproval>;
+  /**
+   * Ask the user to approve a bash command. Returns their choice. `reason`
+   * is set only in auto mode, when the classifier flagged the command — the
+   * UI shows it so the human knows why they're being asked.
+   */
+  confirmBash: (command: string, reason?: string) => Promise<BashApproval>;
+  /**
+   * Auto-mode gate: a fast model judges whether a command is safe to run
+   * without asking. Optional — if absent (or it throws), auto mode degrades
+   * to the normal confirmation prompt, never to a silent run.
+   */
+  classifyBash?: (
+    command: string,
+  ) => Promise<{ allow: boolean; reason?: string }>;
   /** Show multiple-choice questions and resolve with the answers. */
   askQuestion: (questions: Question[]) => Promise<QuestionAnswer[]>;
   /** Show a plan and resolve with approval or rejection feedback. */
@@ -526,16 +538,35 @@ async function runBash(
   ctx: ToolContext,
   signal?: AbortSignal,
 ): Promise<string> {
-  if (!ctx.trust && !isBashAllowed(command)) {
-    const choice = await ctx.confirmBash(command);
-    if (choice === "no") {
-      throw new Error("Command denied by user.");
-    }
-    if (choice === "always") {
-      allowBashPrefix(suggestBashPrefix(command));
-    }
+  const run = () => bash(command, signal, resolveBashEnv(ctx.trust));
+
+  // --trust, or an already-"always"-approved prefix: run, no questions,
+  // no classifier call. This path is identical in every mode.
+  if (ctx.trust || isBashAllowed(command)) return await run();
+
+  // Auto mode: let a fast model wave through the obviously-safe commands.
+  // Only flagged commands fall through to the human prompt, carrying the
+  // reason. A missing classifier or ANY classifier failure counts as
+  // flagged — we degrade toward the prompt, never toward a silent run.
+  let reason: string | undefined;
+  if (ctx.getMode() === "auto") {
+    const verdict = ctx.classifyBash
+      ? await ctx
+          .classifyBash(command)
+          .catch(() => ({ allow: false, reason: "classifier unavailable" }))
+      : { allow: false, reason: "no classifier configured" };
+    if (verdict.allow) return await run();
+    reason = verdict.reason;
   }
-  return await bash(command, signal, resolveBashEnv(ctx.trust));
+
+  const choice = await ctx.confirmBash(command, reason);
+  if (choice === "no") {
+    throw new Error("Command denied by user.");
+  }
+  if (choice === "always") {
+    allowBashPrefix(suggestBashPrefix(command));
+  }
+  return await run();
 }
 
 // Keys forwarded to every bash invocation. Enough for typical tools to work

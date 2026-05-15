@@ -37,7 +37,7 @@ First launch will ask for an Anthropic API key. It's saved to `~/.config/sprite/
 ## In the prompt
 
 - `↑ / ↓` — recall previous prompts
-- `Shift+Tab` — toggle plan mode (read-only; propose a plan for approval before editing)
+- `Shift+Tab` — cycle mode: **default** (prompts before running bash) → **plan** (read-only; propose a plan for approval before editing) → **auto** (a fast model waves through safe bash; anything irreversible, destructive, or exfiltrating still stops for your confirmation). The caret stays `❯`; the accent color and status line show which mode you're in.
 - `Esc` — clear the input; if a turn is running, cancel it
 - `Ctrl+O` — expand/collapse tool output in the transcript
 - `Ctrl+A / E / U` — start of line, end of line, clear line
@@ -68,6 +68,8 @@ It also loads sprite's own per-project notes from `~/.config/sprite/notes/` — 
 ## Permissions
 
 Shell commands prompt for confirmation before running. Choosing "always" remembers the command prefix for this project (stored in `~/.config/sprite/projects.json`, keyed by directory so a cloned repo can't pre-seed its own allowlist). Commands containing shell operators (`;`, `|`, `$(` …) always prompt. `--trust` skips all of it.
+
+In **auto mode** (`Shift+Tab`), commands that aren't already allowlisted are judged by a fast classifier instead of prompting. Routine local work — builds, tests, `git status`/`diff`/`log`, greps — runs silently; anything irreversible, destructive, or exfiltrating falls back to the normal confirmation prompt with the reason. The classifier never silently runs a flagged command and never hard-refuses one — it degrades toward asking you. It reads the same `CLAUDE.md`/`AGENTS.md` the model does, so project rules like "never force-push" steer it too.
 
 Reads and edits are confined to the git root (or cwd if there isn't one); paths outside it are refused. `fetch_url` refuses private/local addresses. Both escape hatches are `bash`, which has the confirmation gate.
 

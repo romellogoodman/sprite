@@ -28,7 +28,7 @@ export function Header() {
         <Text dimColor>
           <Text color="cyan">!</Text> shell <Text color="cyan">@</Text> file{" "}
           <Text color="cyan">/</Text> commands <Text color="cyan">↑↓</Text>{" "}
-          history <Text color="cyan">shift+tab</Text> plan mode
+          history <Text color="cyan">shift+tab</Text> mode
         </Text>
       </Box>
     </Box>

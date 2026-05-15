@@ -5,6 +5,7 @@ import type Anthropic from "@anthropic-ai/sdk";
 import {
   runTurn,
   compactHistory,
+  classifyCommand,
   model,
   contextWindow,
   type AgentEvent,
@@ -36,6 +37,7 @@ import { PlanApproval } from "./PlanApproval.js";
 
 type PendingBash = {
   command: string;
+  reason?: string;
   resolve: (a: BashApproval) => void;
 };
 type PendingQuestion = {
@@ -147,10 +149,16 @@ export function App({
     trust,
     getMode: () => modeRef.current,
     setMode,
-    confirmBash: (command) =>
+    confirmBash: (command, reason) =>
       new Promise<BashApproval>((resolve) => {
-        setPendingBash({ command, resolve });
+        setPendingBash({ command, reason, resolve });
       }),
+    // Read the key from config at call time rather than closing over the
+    // apiKey state — this ref object is built on first render, possibly
+    // before login. A thrown/missing key is caught in runBash and degrades
+    // to the confirmation prompt.
+    classifyBash: (command) =>
+      classifyCommand(loadApiKey()!, command, process.cwd()),
     askQuestion: (questions) =>
       new Promise<QuestionAnswer[]>((resolve) => {
         setPendingQuestion({ questions, resolve });
@@ -171,7 +179,10 @@ export function App({
     // mid-turn mode flips still work at the tool layer (getMode() is live),
     // but the UX is confusing so we don't expose it here.
     if (key.shift && key.tab && !busy && !modelPickerOpen) {
-      setMode(modeRef.current === "default" ? "plan" : "default");
+      const cycle: PermissionMode[] = ["default", "plan", "auto"];
+      const next =
+        cycle[(cycle.indexOf(modeRef.current) + 1) % cycle.length]!;
+      setMode(next);
       return;
     }
     // Esc during a turn always aborts. PromptInput's own esc handler also
@@ -503,12 +514,14 @@ export function App({
     ? "yellow"
     : mode === "plan"
       ? "magenta"
-      : busy
-        ? "gray"
-        : "cyan";
+      : mode === "auto"
+        ? "green"
+        : busy
+          ? "gray"
+          : "cyan";
   const pct = Math.round((100 * contextUsed) / contextWindow());
   const status = [
-    mode === "plan" ? "plan mode" : null,
+    mode === "plan" ? "plan mode" : mode === "auto" ? "auto mode" : null,
     pct >= 60 ? `${pct}% context` : null,
   ]
     .filter(Boolean)
@@ -538,7 +551,10 @@ export function App({
       </Box>
 
       {pendingBash ? (
-        <BashConfirm command={pendingBash.command} />
+        <BashConfirm
+          command={pendingBash.command}
+          reason={pendingBash.reason}
+        />
       ) : pendingNote ? (
         <NoteConfirm note={pendingNote.note} />
       ) : pendingQuestion ? (

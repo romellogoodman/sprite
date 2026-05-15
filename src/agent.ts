@@ -372,6 +372,65 @@ export async function compactHistory(
   ];
 }
 
+const CLASSIFY_PROMPT = `You are the auto-mode gate for sprite, a local coding agent on one developer's machine. A shell command is about to run. Decide whether it runs silently or pauses for the human.
+
+Block (pause) if the command is:
+- Irreversible — deletes data not trivially recoverable (rm -rf, overwriting or truncating files not tracked by git, git reset --hard, git clean -fdx, dropping a database), rewrites shared history (git push --force, rebasing a pushed branch), or publishes/deploys (push to a remote, npm publish, release scripts, terraform apply).
+- Destructive to the environment — global or version-manager installs, package removals, sudo anything, killing processes you don't own, chmod -R / chown -R or config changes outside the project.
+- Exfiltrating — sends local contents outward (curl/wget with --data or uploads, curl … | sh, POST to a URL, scp/rsync to a remote, pastebins), or reads credentials / SSH keys / secrets and transmits them.
+
+Allow (run silently) routine local work: builds, tests, linters, git status/diff/log/add/commit, grep/find/ls/cat, project-local edits, local dev servers, npm install with no -g.
+
+Judge the actual command and its flags, not keywords. When in doubt, block — the fallback is a one-keystroke human prompt, not a refusal, so a false block is cheap and a false allow can be irreversible. Project instructions below (if any) may tighten this; honor them.
+
+Respond with ONLY JSON, nothing else: {"verdict":"allow"} or {"verdict":"block","reason":"<≤8 words>"}.`;
+
+/**
+ * The auto-mode gate. One fast call on the risky bash path: haiku (pinned,
+ * so a weaker session model can't weaken the gate and a stronger one isn't
+ * paid for), the command + cwd, and the same project context the main loop
+ * gets — so a "never force-push" line in CLAUDE.md steers this too. Parse is
+ * deliberately tolerant; anything unexpected resolves to block so the caller
+ * degrades to the human prompt.
+ */
+export async function classifyCommand(
+  apiKey: string,
+  command: string,
+  cwd: string = process.cwd(),
+): Promise<{ allow: boolean; reason?: string }> {
+  const projectContext = loadProjectContext(cwd);
+  const client = new Anthropic({ apiKey });
+  const resp = await client.messages.create({
+    model: DEFAULT_MODEL,
+    max_tokens: 100,
+    system:
+      CLASSIFY_PROMPT +
+      (projectContext
+        ? `\n\nProject instructions that may tighten this:\n${projectContext}`
+        : ""),
+    messages: [{ role: "user", content: `cwd: ${cwd}\ncommand: ${command}` }],
+  });
+  const text = resp.content
+    .filter((b): b is Anthropic.TextBlock => b.type === "text")
+    .map((b) => b.text)
+    .join("")
+    .trim();
+  try {
+    const match = text.match(/\{[\s\S]*\}/);
+    const parsed = JSON.parse(match ? match[0] : text);
+    if (parsed?.verdict === "allow") return { allow: true };
+    return {
+      allow: false,
+      reason:
+        typeof parsed?.reason === "string" && parsed.reason.trim()
+          ? parsed.reason.trim()
+          : "flagged by auto mode",
+    };
+  } catch {
+    return { allow: false, reason: "classifier output unparseable" };
+  }
+}
+
 /**
  * Run one user turn through the agent loop.
  * Appends the user message to history, then loops model → tools → model
