@@ -590,7 +590,7 @@ function readFile(relPath: string, offset = 1, limit = 2000): string {
   const slice = lines.slice(start - 1, end).join("\n");
   const more =
     end < total ? ` Use offset=${end + 1} to continue.` : "";
-  return `[Lines ${start}-${end} of ${total}.${more}]\n${slice}`;
+  return `[Partial view: lines ${start}-${end} of ${total} — this is not the whole file.${more}]\n${slice}`;
 }
 
 function listFiles(relPath: string): string {
