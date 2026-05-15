@@ -2,7 +2,13 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Box, Static, Text, useApp, useInput } from "ink";
 import Spinner from "ink-spinner";
 import type Anthropic from "@anthropic-ai/sdk";
-import { runTurn, compactHistory, model, type AgentEvent } from "../agent.js";
+import {
+  runTurn,
+  compactHistory,
+  model,
+  contextWindow,
+  type AgentEvent,
+} from "../agent.js";
 import { resolveCommand, listCommands } from "../commands.js";
 import { MODELS } from "../models.js";
 import {
@@ -491,12 +497,38 @@ export function App({
   };
   handleSubmitRef.current = handleSubmit;
 
+  // One accent color drives both the prompt caret and the status line, so a
+  // mode flip reads as a single signal (plan → magenta everywhere, etc.).
+  const accent = bashMode
+    ? "yellow"
+    : mode === "plan"
+      ? "magenta"
+      : busy
+        ? "gray"
+        : "cyan";
+  const pct = Math.round((100 * contextUsed) / contextWindow());
+  const status = [
+    mode === "plan" ? "plan mode" : null,
+    pct >= 60 ? `${pct}% context` : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
   return (
     <Box flexDirection="column">
-      <Header contextUsed={contextUsed} mode={mode} />
-
-      <Static items={lines.slice(0, committedCount)}>
-        {(line, i) => <Line key={i} line={line} verbose={verbose} />}
+      <Static
+        items={[
+          { __masthead: true } as const,
+          ...lines.slice(0, committedCount),
+        ]}
+      >
+        {(item, i) =>
+          "__masthead" in item ? (
+            <Header key="header" />
+          ) : (
+            <Line key={i} line={item} verbose={verbose} />
+          )
+        }
       </Static>
 
       <Box flexDirection="column" marginBottom={1}>
@@ -564,13 +596,9 @@ export function App({
           )}
           <PromptInput
             prefix={
-              bashMode ? (
-                <Text color="yellow">! </Text>
-              ) : mode === "plan" ? (
-                <Text color="magenta">plan ❯ </Text>
-              ) : (
-                <Text color={busy ? "gray" : "cyan"}>❯ </Text>
-              )
+              <Text color={accent}>
+                {bashMode ? "! " : "❯ "}
+              </Text>
             }
             value={input}
             onChange={(v) => {
@@ -592,6 +620,9 @@ export function App({
                   : "ask sprite anything (or 'exit')"
             }
           />
+          {/* Always rendered (blank when empty) so toggling the status
+              text doesn't shift the layout and jump the screen. */}
+          <Text color={accent}>{status || " "}</Text>
         </Box>
       )}
     </Box>

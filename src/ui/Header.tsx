@@ -1,19 +1,11 @@
 import { Box, Text } from "ink";
-import { model, contextWindow } from "../agent.js";
-import type { PermissionMode } from "../tools.js";
+import { model } from "../agent.js";
 
-export function Header({
-  contextUsed,
-  mode,
-}: {
-  contextUsed: number;
-  mode: PermissionMode;
-}) {
+export function Header() {
   const cwd = process.cwd();
   const home = process.env.HOME ?? "";
   const pretty =
     home && cwd.startsWith(home) ? "~" + cwd.slice(home.length) : cwd;
-  const pct = Math.round((100 * contextUsed) / contextWindow());
   return (
     <Box
       flexDirection="column"
@@ -31,10 +23,6 @@ export function Header({
       </Text>
       <Text dimColor>
         cwd: {pretty} · {model()}
-        {mode === "plan" && <Text color="magenta"> · plan mode</Text>}
-        {contextUsed > 0 && (
-          <Text color={pct >= 75 ? "yellow" : undefined}> · {pct}% context</Text>
-        )}
       </Text>
       <Box marginTop={1}>
         <Text dimColor>
