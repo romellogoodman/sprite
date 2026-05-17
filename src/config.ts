@@ -55,6 +55,13 @@ const PROJECTS_PATH = path.join(CONFIG_DIR, "projects.json");
 
 type ProjectSettings = {
   allowBash?: string[];
+  /**
+   * Absolute directories in which `edit_file` may write without prompting.
+   * Populated by user-approved "always" choices on the write-confirmation
+   * prompt. Only consulted for paths outside the workspace; in-workspace
+   * writes never touch this list.
+   */
+  allowWrite?: string[];
 };
 
 type ProjectsFile = Record<string, ProjectSettings>;
@@ -137,4 +144,89 @@ export function suggestBashPrefix(command: string): string {
   if (BARE_WRAPPERS.has(cmd)) return command.trim();
   if (arg && /^[a-z][\w-]*$/.test(arg)) return `${cmd} ${arg}`;
   return cmd;
+}
+
+// --- per-project write allowlist, parallel to the bash one above ---
+// Used only for edit_file writes *outside* the workspace. In-workspace writes
+// go through without consulting this list. No shell-meta short-circuit —
+// filesystem paths don't have shell semantics; a directory-prefix match is
+// safe on its own.
+
+/** Does `parent` contain `child` (strictly below it, no equality)? */
+function isInsideDir(parent: string, child: string): boolean {
+  const rel = path.relative(parent, child);
+  return rel !== "" && !rel.startsWith("..") && !path.isAbsolute(rel);
+}
+
+/**
+ * Is this absolute path covered by any entry in the write allowlist? The
+ * match is by directory-prefix: allow `/a/b` permits writes to `/a/b/c.txt`,
+ * `/a/b/sub/d.txt`, etc., but not `/a/sibling` or `/a/bc`.
+ *
+ * `allow` is injectable for tests (skips the projects.json read).
+ */
+export function isWriteAllowed(
+  absPath: string,
+  allow?: readonly string[],
+): boolean {
+  const dirs =
+    allow ?? readProjects()[projectKey()]?.allowWrite ?? [];
+  return dirs.some((d) => {
+    const dir = d.trim();
+    if (!dir) return false;
+    return absPath === dir || isInsideDir(dir, absPath);
+  });
+}
+
+/**
+ * Persist a directory as user-approved for out-of-workspace writes.
+ *
+ * Defense-in-depth: we refuse to store any prefix that would cover the
+ * sprite config dir. The edit_file hard-refusal on CONFIG_DIR catches the
+ * actual write regardless, but this keeps the allowlist from looking
+ * dangerous in `projects.json`, and stops `isWriteAllowed` returning `true`
+ * for a path whose write would then throw.
+ */
+export function allowWriteDir(absDir: string): void {
+  const clean = absDir.trim();
+  if (!clean || !path.isAbsolute(clean)) return;
+  // Refuse any prefix that would allow silent writes to sprite's own
+  // config dir (either equal to or an ancestor of CONFIG_DIR). The hard
+  // refusal in edit_file catches the write itself, but suppressing the
+  // allowlist write too keeps projects.json from encoding a prefix whose
+  // implied allowance is a lie.
+  if (clean === CONFIG_DIR || isInsideDir(clean, CONFIG_DIR)) {
+    return;
+  }
+  const all = readProjects();
+  const key = projectKey();
+  const entry = all[key] ?? {};
+  const allow = entry.allowWrite ?? [];
+  if (!allow.includes(clean)) allow.push(clean);
+  all[key] = { ...entry, allowWrite: allow };
+  writeProjects(all);
+}
+
+/**
+ * Suggest the directory to save for "always allow writes under …".
+ *
+ * When the target file's parent chain includes ancestors that don't yet
+ * exist, return the shallowest such ancestor — i.e. the directory the write
+ * is about to create. This makes scaffolding a new project approvable in
+ * one click: the first write under `~/Desktop/new-proj/` (which doesn't
+ * exist yet) suggests `~/Desktop/new-proj`, covering every subsequent
+ * write into its subtree.
+ *
+ * When every ancestor already exists, return the immediate parent — the
+ * narrowest sensible scope.
+ */
+export function suggestWriteDir(absFilePath: string): string {
+  const immediate = path.dirname(absFilePath);
+  let dir = immediate;
+  while (true) {
+    const parent = path.dirname(dir);
+    if (parent === dir) return immediate; // hit filesystem root
+    if (fs.existsSync(parent)) return dir;
+    dir = parent;
+  }
 }

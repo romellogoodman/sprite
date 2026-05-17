@@ -21,6 +21,7 @@ import {
   type Question,
   type QuestionAnswer,
   type ToolContext,
+  type WriteApproval,
 } from "../tools.js";
 import { startSession, loadLastSession, type Session } from "../session.js";
 import { poem } from "../poem.js";
@@ -29,6 +30,7 @@ import { PromptInput } from "./PromptInput.js";
 import { Header } from "./Header.js";
 import { Line, type DisplayLine } from "./Line.js";
 import { BashConfirm } from "./BashConfirm.js";
+import { WriteConfirm } from "./WriteConfirm.js";
 import { NoteConfirm } from "./NoteConfirm.js";
 import { ModelPicker } from "./ModelPicker.js";
 import { Login } from "./Login.js";
@@ -39,6 +41,10 @@ type PendingBash = {
   command: string;
   reason?: string;
   resolve: (a: BashApproval) => void;
+};
+type PendingWrite = {
+  path: string;
+  resolve: (a: WriteApproval) => void;
 };
 type PendingQuestion = {
   questions: Question[];
@@ -119,6 +125,7 @@ export function App({
   const [bashMode, setBashMode] = useState(false);
   const [verbose, setVerbose] = useState(false);
   const [pendingBash, setPendingBash] = useState<PendingBash | null>(null);
+  const [pendingWrite, setPendingWrite] = useState<PendingWrite | null>(null);
   const [pendingQuestion, setPendingQuestion] =
     useState<PendingQuestion | null>(null);
   const [pendingPlan, setPendingPlan] = useState<PendingPlan | null>(null);
@@ -152,6 +159,10 @@ export function App({
     confirmBash: (command, reason) =>
       new Promise<BashApproval>((resolve) => {
         setPendingBash({ command, reason, resolve });
+      }),
+    confirmWrite: (absPath) =>
+      new Promise<WriteApproval>((resolve) => {
+        setPendingWrite({ path: absPath, resolve });
       }),
     // Read the key from config at call time rather than closing over the
     // apiKey state — this ref object is built on first render, possibly
@@ -196,6 +207,11 @@ export function App({
       if (pendingBash) {
         const { resolve } = pendingBash;
         setPendingBash(null);
+        resolve("no");
+      }
+      if (pendingWrite) {
+        const { resolve } = pendingWrite;
+        setPendingWrite(null);
         resolve("no");
       }
       if (pendingQuestion) {
@@ -263,6 +279,21 @@ export function App({
       }
     },
     { isActive: pendingBash !== null },
+  );
+
+  useInput(
+    (ch) => {
+      if (!pendingWrite) return;
+      const c = ch.toLowerCase();
+      if (c === "y" || c === "a" || c === "n") {
+        const answer: WriteApproval =
+          c === "y" ? "yes" : c === "a" ? "always" : "no";
+        const { resolve } = pendingWrite;
+        setPendingWrite(null);
+        resolve(answer);
+      }
+    },
+    { isActive: pendingWrite !== null },
   );
 
   useInput(
@@ -555,6 +586,8 @@ export function App({
           command={pendingBash.command}
           reason={pendingBash.reason}
         />
+      ) : pendingWrite ? (
+        <WriteConfirm path={pendingWrite.path} />
       ) : pendingNote ? (
         <NoteConfirm note={pendingNote.note} />
       ) : pendingQuestion ? (

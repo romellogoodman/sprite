@@ -24,6 +24,12 @@ export async function runPrint(prompt: string, trust: boolean): Promise<void> {
       );
       return "no";
     },
+    onWrite: async (absPath) => {
+      process.stderr.write(
+        `✗ write denied (non-interactive): ${absPath}\n  Writes outside the project need confirmation; re-run with --trust or allowlist the directory interactively.\n`,
+      );
+      return "no";
+    },
   });
 
   const controller = new AbortController();

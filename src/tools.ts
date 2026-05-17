@@ -13,6 +13,9 @@ import {
   isBashAllowed,
   allowBashPrefix,
   suggestBashPrefix,
+  isWriteAllowed,
+  allowWriteDir,
+  suggestWriteDir,
 } from "./config.js";
 import { invalidateFileCache } from "./completion.js";
 import { appendNote, sanitizeNote } from "./session.js";
@@ -45,18 +48,21 @@ function isInside(child: string, parent: string): boolean {
   return rel !== "" && !rel.startsWith("..") && !path.isAbsolute(rel);
 }
 
-/** Refuse writes outside the workspace or anywhere under sprite's own config. */
-function assertWritable(relPath: string): string {
-  const abs = path.resolve(relPath);
+/**
+ * Hard refusal: writes inside sprite's own config dir are never allowed, no
+ * matter what `--trust`, the write allowlist, or an "always" approval say.
+ * This protects `projects.json` from a model rewriting the allowlist to
+ * grant itself silent writes on the next call (privilege escalation).
+ */
+function assertNotConfigDir(abs: string): void {
   if (isInside(abs, CONFIG_DIR) || abs === CONFIG_DIR) {
     throw new Error(`Refusing to edit sprite's own config: ${abs}`);
   }
-  if (!isInside(abs, WORKSPACE) && abs !== WORKSPACE) {
-    throw new Error(
-      `Refusing to edit outside the workspace (${WORKSPACE}): ${abs}`,
-    );
-  }
-  return abs;
+}
+
+/** Is this resolved path inside the workspace (or equal to its root)? */
+function isInWorkspace(abs: string): boolean {
+  return isInside(abs, WORKSPACE) || abs === WORKSPACE;
 }
 
 /**
@@ -155,13 +161,13 @@ const ALL_TOOLS: Anthropic.Tool[] = [
   {
     name: "edit_file",
     description:
-      "Edit a file by replacing exact string matches. Pass old_str/new_str for a single edit, or an edits array for several non-overlapping edits in one call (e.g. renaming a symbol at every occurrence). Each old_str must match exactly once in the file as it is on disk. If the file does not exist, pass a single empty old_str and the file is created with new_str as its contents. Writes are confined to the current project (the git root); paths outside it are refused.",
+      "Edit a file by replacing exact string matches. Pass old_str/new_str for a single edit, or an edits array for several non-overlapping edits in one call (e.g. renaming a symbol at every occurrence). Each old_str must match exactly once in the file as it is on disk. If the file does not exist, pass a single empty old_str and the file is created with new_str as its contents. Writes inside the current project (the git root) run silently. Writes to paths outside the project prompt the user for confirmation; approving with 'always' extends the allowance to every file under that directory for this project, so scaffolding a new project in a sibling directory costs only one prompt.",
     input_schema: {
       type: "object",
       properties: {
         path: {
           type: "string",
-          description: "Relative path to the file to edit or create.",
+          description: "Path to the file to edit or create. Relative paths resolve against the current working directory; absolute paths are also accepted (they'll prompt for confirmation if outside the project).",
         },
         old_str: {
           type: "string",
@@ -375,6 +381,8 @@ function capTail(s: string): string {
 }
 
 export type BashApproval = "yes" | "always" | "no";
+/** Same shape as BashApproval; kept as a distinct name for call-site clarity. */
+export type WriteApproval = "yes" | "always" | "no";
 
 export type ToolContext = {
   /** Skip all confirmations (--trust). */
@@ -389,6 +397,15 @@ export type ToolContext = {
    * UI shows it so the human knows why they're being asked.
    */
   confirmBash: (command: string, reason?: string) => Promise<BashApproval>;
+  /**
+   * Ask the user to approve an out-of-workspace `edit_file` write. The
+   * absolute target path is shown so the human can see exactly what's
+   * being approved; "always" persists a directory prefix to
+   * `projects.json` (see `allowWriteDir` in config.ts). In-workspace
+   * writes and writes already covered by the allowlist bypass this
+   * prompt and never call through.
+   */
+  confirmWrite: (absPath: string) => Promise<WriteApproval>;
   /**
    * Auto-mode gate: a fast model judges whether a command is safe to run
    * without asking. Optional — if absent (or it throws), auto mode degrades
@@ -409,17 +426,21 @@ export type ToolContext = {
  * A ToolContext for driving runTurn without a UI. Mode is fixed to 'default';
  * interactive tools (ask_user_question, exit_plan_mode) auto-decline. bash
  * calls that aren't already allowlisted go to onBash — defaulting to deny, so
- * pass `trust: true` or your own onBash if you want commands to run.
+ * pass `trust: true` or your own onBash if you want commands to run. Same
+ * for out-of-workspace writes: onWrite defaults to deny, so headless callers
+ * must either stay in-workspace, pass `trust: true`, or handle onWrite.
  */
 export function headlessContext(opts?: {
   trust?: boolean;
   onBash?: (command: string) => Promise<BashApproval>;
+  onWrite?: (absPath: string) => Promise<WriteApproval>;
 }): ToolContext {
   return {
     trust: opts?.trust ?? false,
     getMode: () => "default",
     setMode: () => {},
     confirmBash: opts?.onBash ?? (async () => "no"),
+    confirmWrite: opts?.onWrite ?? (async () => "no"),
     askQuestion: async () => [],
     approvePlan: async () => ({
       approved: false,
@@ -455,7 +476,7 @@ export async function executeTool(
             (e) => ({ old_str: String(e.old_str), new_str: String(e.new_str) }),
           )
         : [{ old_str: String(input.old_str), new_str: String(input.new_str) }];
-      return editFile(String(input.path), edits);
+      return await editFile(String(input.path), edits, ctx);
     }
     case "bash":
       return capTail(await runBash(String(input.command), ctx, signal));
@@ -635,17 +656,38 @@ const toLF = (s: string) => s.replace(/\r\n/g, "\n");
 
 type EditPair = { old_str: string; new_str: string };
 
-function editFile(relPath: string, edits: EditPair[]): string {
-  assertWritable(relPath);
+async function editFile(
+  relPath: string,
+  edits: EditPair[],
+  ctx: ToolContext,
+): Promise<string> {
+  const abs = path.resolve(relPath);
+  // Sprite's own config is never writable, regardless of trust or allowlist.
+  // Done first so no confirmation path can reach it.
+  assertNotConfigDir(abs);
+
+  // Out-of-workspace writes go through a confirmation gate that mirrors
+  // the bash flow: trust bypasses; an allowlisted parent dir runs silently;
+  // otherwise we prompt, and "always" persists the suggested dir prefix.
+  if (!isInWorkspace(abs) && !ctx.trust && !isWriteAllowed(abs)) {
+    const choice = await ctx.confirmWrite(abs);
+    if (choice === "no") {
+      throw new Error("Write denied by user.");
+    }
+    if (choice === "always") {
+      allowWriteDir(suggestWriteDir(abs));
+    }
+  }
+
   if (edits.length === 0) throw new Error("No edits provided.");
-  const exists = fs.existsSync(relPath);
+  const exists = fs.existsSync(abs);
 
   if (!exists) {
     if (edits.length > 1 || edits[0].old_str !== "") {
       throw new Error(`File not found: ${relPath}`);
     }
-    fs.mkdirSync(path.dirname(relPath), { recursive: true });
-    fs.writeFileSync(relPath, edits[0].new_str, "utf8");
+    fs.mkdirSync(path.dirname(abs), { recursive: true });
+    fs.writeFileSync(abs, edits[0].new_str, "utf8");
     // The @-completion file walk is memoized; a new file is a mutation point,
     // so bust it or the path never shows up in the picker this session.
     invalidateFileCache();
@@ -655,7 +697,7 @@ function editFile(relPath: string, edits: EditPair[]): string {
   // Match and edit on LF-normalized text so CRLF files still match old_str
   // coming from the model (which is always LF). Remember the original EOL
   // and BOM so we can round-trip them on write.
-  const raw = fs.readFileSync(relPath, "utf8");
+  const raw = fs.readFileSync(abs, "utf8");
   const hasBOM = raw.charCodeAt(0) === 0xfeff;
   const body = hasBOM ? raw.slice(1) : raw;
   const eol = body.includes("\r\n") ? "\r\n" : "\n";
@@ -704,7 +746,7 @@ function editFile(relPath: string, edits: EditPair[]): string {
   const out =
     (hasBOM ? "\ufeff" : "") +
     (eol === "\r\n" ? edited.replace(/\n/g, "\r\n") : edited);
-  fs.writeFileSync(relPath, out, "utf8");
+  fs.writeFileSync(abs, out, "utf8");
 
   const diffs = located
     .map((l) => renderDiff(content, l.oldStr, l.newStr))
