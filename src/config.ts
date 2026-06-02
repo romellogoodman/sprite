@@ -2,8 +2,17 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-const CONFIG_DIR = path.join(os.homedir(), ".config", "sprite");
-const CONFIG_PATH = path.join(CONFIG_DIR, "config.json");
+const DEFAULT_CONFIG_DIR = path.join(os.homedir(), ".config", "sprite");
+
+// SPRITE_CONFIG_DIR overrides the location (read lazily so tests can stub it
+// per-run); primarily a test isolation hook.
+export function configDir(): string {
+  return process.env.SPRITE_CONFIG_DIR || DEFAULT_CONFIG_DIR;
+}
+
+export function configPath(): string {
+  return path.join(configDir(), "config.json");
+}
 
 type Config = {
   apiKey?: string;
@@ -11,15 +20,15 @@ type Config = {
 
 function readConfig(): Config {
   try {
-    return JSON.parse(fs.readFileSync(CONFIG_PATH, "utf8")) as Config;
+    return JSON.parse(fs.readFileSync(configPath(), "utf8")) as Config;
   } catch {
     return {};
   }
 }
 
 function writeConfig(config: Config): void {
-  fs.mkdirSync(CONFIG_DIR, { recursive: true, mode: 0o700 });
-  fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2) + "\n", {
+  fs.mkdirSync(configDir(), { recursive: true, mode: 0o700 });
+  fs.writeFileSync(configPath(), JSON.stringify(config, null, 2) + "\n", {
     mode: 0o600,
   });
 }
@@ -40,18 +49,10 @@ export function clearApiKey(): void {
   writeConfig(rest);
 }
 
-export function configPath(): string {
-  return CONFIG_PATH;
-}
-
-export function configDir(): string {
-  return CONFIG_DIR;
-}
-
 // --- per-project bash allowlist, stored in the USER config dir ---
 // Keyed by absolute cwd so a cloned repo can't pre-seed its own allowances.
 
-const PROJECTS_PATH = path.join(CONFIG_DIR, "projects.json");
+const projectsPath = () => path.join(configDir(), "projects.json");
 
 type ProjectSettings = {
   allowBash?: string[];
@@ -72,15 +73,15 @@ function projectKey(): string {
 
 function readProjects(): ProjectsFile {
   try {
-    return JSON.parse(fs.readFileSync(PROJECTS_PATH, "utf8")) as ProjectsFile;
+    return JSON.parse(fs.readFileSync(projectsPath(), "utf8")) as ProjectsFile;
   } catch {
     return {};
   }
 }
 
 function writeProjects(p: ProjectsFile): void {
-  fs.mkdirSync(CONFIG_DIR, { recursive: true, mode: 0o700 });
-  fs.writeFileSync(PROJECTS_PATH, JSON.stringify(p, null, 2) + "\n", {
+  fs.mkdirSync(configDir(), { recursive: true, mode: 0o700 });
+  fs.writeFileSync(projectsPath(), JSON.stringify(p, null, 2) + "\n", {
     mode: 0o600,
   });
 }
@@ -195,7 +196,8 @@ export function allowWriteDir(absDir: string): void {
   // refusal in edit_file catches the write itself, but suppressing the
   // allowlist write too keeps projects.json from encoding a prefix whose
   // implied allowance is a lie.
-  if (clean === CONFIG_DIR || isInsideDir(clean, CONFIG_DIR)) {
+  const cfg = configDir();
+  if (clean === cfg || isInsideDir(clean, cfg)) {
     return;
   }
   const all = readProjects();

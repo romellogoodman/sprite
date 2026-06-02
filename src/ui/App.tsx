@@ -27,6 +27,7 @@ import { startSession, loadLastSession, type Session } from "../session.js";
 import { poem } from "../poem.js";
 import { loadApiKey, saveApiKey, clearApiKey } from "../config.js";
 import { PromptInput } from "./PromptInput.js";
+import { BRAND, PLAN_ACCENT, AUTO_ACCENT, WARN } from "./theme.js";
 import { Header } from "./Header.js";
 import { Line, type DisplayLine } from "./Line.js";
 import { BashConfirm } from "./BashConfirm.js";
@@ -542,14 +543,14 @@ export function App({
   // One accent color drives both the prompt caret and the status line, so a
   // mode flip reads as a single signal (plan → magenta everywhere, etc.).
   const accent = bashMode
-    ? "yellow"
+    ? WARN
     : mode === "plan"
-      ? "magenta"
+      ? PLAN_ACCENT
       : mode === "auto"
-        ? "green"
+        ? AUTO_ACCENT
         : busy
           ? "gray"
-          : "cyan";
+          : BRAND;
   const pct = Math.round((100 * contextUsed) / contextWindow());
   const status = [
     mode === "plan" ? "plan mode" : mode === "auto" ? "auto mode" : null,
@@ -623,7 +624,7 @@ export function App({
         <Box flexDirection="column">
           {busy && (
             <Box>
-              <Text color="cyan">
+              <Text color={BRAND}>
                 <Spinner type="dots" />
               </Text>
               <Text dimColor> {phrase}…</Text>

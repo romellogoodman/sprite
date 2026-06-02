@@ -298,6 +298,64 @@ async function withRetry<T>(
   }
 }
 
+/**
+ * Prompt caching: the API caches the request prefix (tools → system →
+ * messages) up to each `cache_control` breakpoint. We set three:
+ * the last tool def and the system block cover the static prefix, and the
+ * final content block of the last message moves forward each request so the
+ * whole growing history is re-read from cache instead of re-billed.
+ */
+function cachedSystem(system: string): Anthropic.TextBlockParam[] {
+  return [{ type: "text", text: system, cache_control: { type: "ephemeral" } }];
+}
+
+function cachedTools(tools: Anthropic.ToolUnion[]): Anthropic.ToolUnion[] {
+  if (tools.length === 0) return tools;
+  return tools.map((t, i) =>
+    i === tools.length - 1 ? { ...t, cache_control: { type: "ephemeral" } } : t,
+  );
+}
+
+/**
+ * Return a copy of `messages` with an ephemeral cache breakpoint on the final
+ * content block of the last message. Stored history is never mutated — the
+ * marker is added per-request so it always sits at the live end of the
+ * conversation. String content is wrapped into a text block to carry it.
+ */
+export function withCacheMarker(
+  messages: Anthropic.MessageParam[],
+): Anthropic.MessageParam[] {
+  if (messages.length === 0) return messages;
+  const last = messages[messages.length - 1];
+  let content: Anthropic.MessageParam["content"];
+  if (typeof last.content === "string") {
+    content = [
+      {
+        type: "text",
+        text: last.content,
+        cache_control: { type: "ephemeral" },
+      },
+    ];
+  } else {
+    const blocks = [...last.content];
+    const tail = blocks[blocks.length - 1];
+    // thinking/redacted_thinking blocks can't carry cache_control; skip the
+    // marker rather than 400 the request.
+    if (
+      tail &&
+      tail.type !== "thinking" &&
+      tail.type !== "redacted_thinking"
+    ) {
+      blocks[blocks.length - 1] = {
+        ...tail,
+        cache_control: { type: "ephemeral" },
+      } as (typeof blocks)[number];
+    }
+    content = blocks;
+  }
+  return [...messages.slice(0, -1), { ...last, content }];
+}
+
 /** Rough token count. Good enough to decide where to cut; not for billing. */
 function estimateTokens(m: Anthropic.MessageParam): number {
   const s =
@@ -477,10 +535,9 @@ export async function runTurn(
             model: model(),
             max_tokens: 16000,
             ...modelParams(),
-            cache_control: { type: "ephemeral" },
-            system,
-            tools: toolsForMode(ctx.getMode()),
-            messages,
+            system: cachedSystem(system),
+            tools: cachedTools(toolsForMode(ctx.getMode())),
+            messages: withCacheMarker(messages),
           },
           { signal },
         );

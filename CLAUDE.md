@@ -18,6 +18,8 @@ TypeScript/Node (ESM), `@anthropic-ai/sdk`, `ink`+React for the TUI.
 
 - Run: `npm start`
 - Typecheck: `npm run typecheck`
+- Test: `npm test` (tools, config, session, agent helpers, completion)
+- Probe: `npm run probe` — real-API behavior battery (tool calls, caching, thinking); reports to `docs/probes/`
 
 ## Layout
 
@@ -31,6 +33,8 @@ TypeScript/Node (ESM), `@anthropic-ai/sdk`, `ink`+React for the TUI.
 - `src/session.ts` — JSONL persistence under `~/.config/sprite/sessions/`, cross-session notes under `~/.config/sprite/notes/`
 - `src/config.ts` — API key + per-project bash allowlist
 - `src/completion.ts`, `src/poem.ts` — typeahead matches, spinner phrases
+- `src/probe.ts` — `npm run probe`; model-behavior reports to `docs/probes/` (ported from lca)
+- `src/ui/theme.ts` — all TUI colors (brand/mode accents/warn) in one place
 - `src/ui/` — Ink/React components
   - `App.tsx` — top-level state, slash commands, event loop wiring; owns the single `accent` color shared by the prompt caret and the status line below the input (renders "plan mode" and, only at 60%+, context %; always one row so it can't jump the layout)
   - `Line.tsx` — renders one transcript row; owns `DisplayLine`
@@ -59,12 +63,21 @@ Bash is spawned with a narrow env whitelist by default (`SAFE_ENV_KEYS` in `tool
 
 `read_file`/`list_files` are confined to the workspace, symlink-aware (`assertReadable`) — reads stay strictly in-tree because an exfil read into the transcript is silent damage, whereas an out-of-tree write at least passes through a visible confirmation. `fetch_url` refuses private/loopback/link-local addresses via a DNS-pinned lookup so the checked address is the connected address, re-applied on every redirect hop (`ssrfLookup`). The escape hatch for reads is `bash` — it has the confirmation gate. These close the "prompt injection in a cloned README reads `~/.ssh/` or hits the cloud metadata endpoint" exfil paths.
 
+## Prompt caching
+
+`runTurn` sets three cache breakpoints per request (see `cachedSystem`/`cachedTools`/`withCacheMarker` in agent.ts): the last tool def, the system block, and the final content block of the last message — the moving marker means the whole growing history re-reads from cache each round-trip. The mode reminder is injected into the user message, not the system prompt, so shift+tab flips don't bust the cache. Don't add anything per-turn-variable to the system prompt or tool defs.
+
 ## Principles
 
 - Keep the loop small. Complexity belongs in tool implementations, not orchestration.
 - Tool descriptions are load-bearing — the model reasons from them. Write them with care.
 - The client owns conversation state; resend the full history every turn.
 - No agent framework. If you reach for one, reread the references.
+- **Twin sync**: local-coding-agent (`../local-coding-agent`) is sprite's Ollama twin. The
+  security-critical code is duplicated, not shared — the SSRF guard + private-address
+  ranges, the bash env whitelist (`SAFE_ENV_KEYS`), the config-dir hard refusal, and the
+  untrusted fetch-content footer in `tools.ts`. When touching any of these, check whether
+  the same change belongs in lca, and vice versa. A drift here is a real security risk.
 
 ## References
 

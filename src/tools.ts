@@ -41,7 +41,8 @@ const WORKSPACE_REAL = (() => {
     return WORKSPACE;
   }
 })();
-const CONFIG_DIR = configDir();
+// Read lazily so SPRITE_CONFIG_DIR set by tests (or per-run) is honored.
+const CONFIG_DIR = () => configDir();
 
 function isInside(child: string, parent: string): boolean {
   const rel = path.relative(parent, child);
@@ -55,7 +56,8 @@ function isInside(child: string, parent: string): boolean {
  * grant itself silent writes on the next call (privilege escalation).
  */
 function assertNotConfigDir(abs: string): void {
-  if (isInside(abs, CONFIG_DIR) || abs === CONFIG_DIR) {
+  const cfg = CONFIG_DIR();
+  if (isInside(abs, cfg) || abs === cfg) {
     throw new Error(`Refusing to edit sprite's own config: ${abs}`);
   }
 }
@@ -81,7 +83,8 @@ function assertReadable(relPath: string): string {
   } catch {
     // Doesn't exist / can't stat — readFile will throw a clearer error.
   }
-  if (isInside(real, CONFIG_DIR) || real === CONFIG_DIR) {
+  const cfg = CONFIG_DIR();
+  if (isInside(real, cfg) || real === cfg) {
     throw new Error(`Refusing to read sprite's own config: ${abs}`);
   }
   if (!isInside(real, WORKSPACE_REAL) && real !== WORKSPACE_REAL) {
@@ -814,6 +817,7 @@ PRIVATE_NETS.addSubnet("172.16.0.0", 12); // RFC1918
 PRIVATE_NETS.addSubnet("192.0.0.0", 24); // IETF protocol assignments
 PRIVATE_NETS.addSubnet("192.168.0.0", 16); // RFC1918
 PRIVATE_NETS.addSubnet("198.18.0.0", 15); // benchmark
+PRIVATE_NETS.addSubnet("224.0.0.0", 3); // multicast + reserved + broadcast (224–255)
 // IPv6
 PRIVATE_NETS.addSubnet("::", 128, "ipv6"); // unspecified
 PRIVATE_NETS.addSubnet("::1", 128, "ipv6"); // loopback
