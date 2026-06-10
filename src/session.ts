@@ -92,20 +92,38 @@ function pruneSessions(dir: string): void {
 }
 
 /**
- * Start a new session file for this cwd. Returns a save() that rewrites the
- * file with the full history as JSONL. Rewriting is fine at sprite's scale
- * and means the file is always a consistent snapshot.
+ * Start a new session file for this cwd. Returns a save() that appends only
+ * the messages added since the last call — JSONL is append-friendly, so the
+ * common per-round-trip checkpoint is an O(delta) write rather than an
+ * O(history) rewrite. When the history shrinks or its prefix changes (e.g.
+ * /compact replaces the head with a summary) we fall back to a full rewrite,
+ * so the file stays a faithful snapshot.
  */
 export function startSession(cwd: string = process.cwd()): Session {
   const dir = sessionDir(cwd);
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
   pruneSessions(dir);
   const file = path.join(dir, `${new Date().toISOString().replace(/[:.]/g, "-")}.jsonl`);
+  const serialize = (m: Anthropic.MessageParam) => JSON.stringify(m);
+  let written = 0;
   return {
     file,
     save(history) {
-      const body = history.map((m) => JSON.stringify(m)).join("\n") + "\n";
-      fs.writeFileSync(file, body, { mode: 0o600 });
+      if (written > 0 && history.length > written) {
+        // Pure growth since the last save: append the new tail only.
+        const delta = history.slice(written);
+        fs.appendFileSync(file, delta.map(serialize).join("\n") + "\n", {
+          mode: 0o600,
+        });
+      } else {
+        // First write, or the history was rewritten (compaction/clear): full
+        // snapshot. history.length === written is also handled here as a
+        // (cheap) no-change rewrite.
+        const body =
+          history.length === 0 ? "" : history.map(serialize).join("\n") + "\n";
+        fs.writeFileSync(file, body, { mode: 0o600 });
+      }
+      written = history.length;
     },
   };
 }
