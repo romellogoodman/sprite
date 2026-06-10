@@ -371,7 +371,9 @@ function capTail(s: string): string {
     os.tmpdir(),
     `sprite-bash-${randomUUID().slice(0, 8)}.log`,
   );
-  fs.writeFileSync(spill, s, "utf8");
+  // 0o600: bash output can contain secrets (an env dump, a cat'd key file),
+  // and on a shared host the default 0o644 would leave the spill world-readable.
+  fs.writeFileSync(spill, s, { encoding: "utf8", mode: 0o600 });
   // Start the tail at a line boundary so the first visible line isn't torn.
   let cut = s.length - MAX_OUTPUT;
   const nl = s.indexOf("\n", cut);
