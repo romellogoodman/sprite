@@ -101,7 +101,26 @@ function isInside(child: string, parent: string): boolean {
  * prompt. Files in ~/.config/sprite/ or above the git root are left alone —
  * those are the user's own, and dotfile managers legitimately symlink them.
  */
-function loadProjectContext(cwd: string = process.cwd()): string {
+// The instruction-file sections (config dir + every ancestor up to the git
+// root) are stable for the life of a session — finding them walks the tree
+// with existsSync/realpathSync and reads each file, which buildSystemPrompt
+// (every turn) and classifyCommand (every auto-mode bash) would otherwise
+// repeat. Cache the file-derived sections per cwd; notes are read fresh below
+// since save_note can add one mid-session. Cleared by /clear via
+// invalidateProjectContext.
+const projectContextCache = new Map<string, string[]>();
+
+// Per-file truncation ceiling for instruction files and notes.
+const MAX = 32 * 1024;
+
+/** Drop the memoized project-context sections (called on /clear). */
+export function invalidateProjectContext(): void {
+  projectContextCache.clear();
+}
+
+function loadContextSections(cwd: string): string[] {
+  const cached = projectContextCache.get(cwd);
+  if (cached) return cached;
   const names = ["AGENTS.md", "AGENT.md", "CLAUDE.md"];
   const seen = new Set<string>();
   const sections: string[] = [];
@@ -130,7 +149,6 @@ function loadProjectContext(cwd: string = process.cwd()): string {
       })()
     : null;
 
-  const MAX = 32 * 1024;
   const tryLoad = (dir: string, inRepo: boolean) => {
     for (const name of names) {
       try {
@@ -153,11 +171,19 @@ function loadProjectContext(cwd: string = process.cwd()): string {
   tryLoad(configDir(), false);
   for (const d of ancestors.reverse()) tryLoad(d, gitRoot != null);
 
+  projectContextCache.set(cwd, sections);
+  return sections;
+}
+
+function loadProjectContext(cwd: string = process.cwd()): string {
+  const sections = [...loadContextSections(cwd)];
+
   // Sprite's own scratch notes — what past sessions learned about this repo.
   // Stored under ~/.config/sprite/notes/, not the repo: edit_file refuses the
   // config dir and a cloned repo can't pre-seed it, so the only write path is
   // the save_note tool, which prompts for approval. Loaded last and labelled
   // so the human-curated instruction files above take priority on conflicts.
+  // Read fresh (not cached) so a save_note this session shows up next turn.
   let notes = loadNotes(cwd);
   if (notes) {
     if (notes.length > MAX) notes = notes.slice(0, MAX) + "\n[...truncated]";

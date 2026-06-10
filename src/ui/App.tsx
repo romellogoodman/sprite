@@ -6,6 +6,7 @@ import {
   runTurn,
   compactHistory,
   classifyCommand,
+  invalidateProjectContext,
   model,
   contextWindow,
   type AgentEvent,
@@ -384,6 +385,7 @@ export function App({
       setLines([]);
       setHistory([]);
       setContextUsed(0);
+      invalidateProjectContext();
       setSession(startSession());
       return;
     }
