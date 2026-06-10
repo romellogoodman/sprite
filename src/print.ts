@@ -41,7 +41,10 @@ export async function runPrint(prompt: string, trust: boolean): Promise<void> {
   try {
     await runTurn(apiKey, [], prompt, ctx, (e) => {
       if (e.type === "text") {
-        process.stdout.write(e.text + "\n");
+        // Deltas are partial chunks, not whole lines — write them verbatim and
+        // emit a single trailing newline on `done`, or the output is shredded
+        // into one line per streamed token.
+        process.stdout.write(e.text);
       } else if (e.type === "tool_use") {
         process.stderr.write(`⚙ ${e.name} ${summarizeInput(e.name, e.input)}\n`);
       } else if (e.type === "tool_result") {
@@ -52,6 +55,7 @@ export async function runPrint(prompt: string, trust: boolean): Promise<void> {
           `⟳ retrying (${e.attempt}) in ${Math.round(e.delayMs / 1000)}s — ${e.reason}\n`,
         );
       } else if (e.type === "done") {
+        process.stdout.write("\n");
         const s = (e.durationMs / 1000).toFixed(1);
         process.stderr.write(`✓ done ${s}s · ${e.input} in / ${e.output} out\n`);
       }
