@@ -25,7 +25,6 @@ export function listProjectFiles(root: string = process.cwd()): string[] {
   if (fileCache) return fileCache;
   const out: string[] = [];
   const walk = (dir: string, rel: string) => {
-    if (out.length > 5000) return;
     let entries: fs.Dirent[];
     try {
       entries = fs.readdirSync(dir, { withFileTypes: true });
@@ -33,7 +32,8 @@ export function listProjectFiles(root: string = process.cwd()): string[] {
       return;
     }
     for (const e of entries) {
-      if (e.name.startsWith(".") && e.name !== ".env") continue;
+      if (out.length > 5000) return;
+      if (e.name.startsWith(".")) continue;
       const r = rel ? path.posix.join(rel, e.name) : e.name;
       if (e.isDirectory()) {
         if (SKIP_DIRS.has(e.name)) continue;
