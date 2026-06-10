@@ -75,7 +75,7 @@ function isInWorkspace(abs: string): boolean {
  * `link -> /etc` inside the repo can't route around the check. Legit
  * out-of-tree reads go through `bash` (which has its own confirmation gate).
  */
-function assertReadable(relPath: string): string {
+export function assertReadable(relPath: string): string {
   const abs = path.resolve(relPath);
   let real = abs;
   try {

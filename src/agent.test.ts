@@ -67,17 +67,29 @@ describe("withCacheMarker", () => {
 });
 
 describe("expandFileMentions", () => {
-  test("expands an existing file", () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sprite-agent-test-"));
-    const prev = process.cwd();
+  test("expands an existing file inside the workspace", () => {
+    // The file must live inside the workspace (the cwd at module load), since
+    // expansion is confined the same way read_file is.
+    const name = `sprite-mention-test-${process.pid}.txt`;
     try {
-      process.chdir(dir);
-      fs.writeFileSync("notes.txt", "file body");
-      const out = expandFileMentions("see @notes.txt please");
-      assert.match(out, /<file path="notes.txt">/);
+      fs.writeFileSync(name, "file body");
+      const out = expandFileMentions(`see @${name} please`);
+      assert.match(out, new RegExp(`<file path="${name}">`));
       assert.match(out, /file body/);
     } finally {
-      process.chdir(prev);
+      fs.rmSync(name, { force: true });
+    }
+  });
+
+  test("does not expand files outside the workspace", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sprite-agent-test-"));
+    const file = path.join(dir, "secret.txt");
+    try {
+      fs.writeFileSync(file, "top secret");
+      const out = expandFileMentions(`leak @${file} please`);
+      // Left untouched — no <file> wrapper, no contents inlined.
+      assert.equal(out, `leak @${file} please`);
+    } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
   });

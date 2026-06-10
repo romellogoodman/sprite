@@ -1,10 +1,11 @@
-import { readFileSync, existsSync, realpathSync } from "node:fs";
+import { readFileSync, existsSync, realpathSync, statSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import Anthropic from "@anthropic-ai/sdk";
 import {
   toolsForMode,
   executeTool,
+  assertReadable,
   type PermissionMode,
   type ToolContext,
 } from "./tools.js";
@@ -184,16 +185,28 @@ export function buildSystemPrompt(cwd: string = process.cwd()): string {
   return BASE_SYSTEM_PROMPT + buildEnvironment(cwd) + loadProjectContext(cwd);
 }
 
+// Cap inlined `@path` contents so `@package-lock.json` can't blow the token
+// budget or block the event loop. Matches the 50KB tool-output ceiling.
+const MENTION_MAX_BYTES = 50_000;
+
 /**
  * Expand `@path` tokens in a user prompt to the referenced file's contents.
- * Only triggers when the path exists as a regular file; anything else (dirs,
- * missing paths, email-like strings) is left untouched so casual @-mentions
- * in prose don't explode.
+ * Only triggers when the path exists as a regular file inside the workspace;
+ * anything else (dirs, missing paths, out-of-tree paths, oversized/special
+ * files, email-like strings) is left untouched so casual @-mentions in prose
+ * don't explode and `@../../etc/passwd` can't inline arbitrary files.
  */
 export function expandFileMentions(text: string): string {
   return text.replace(/@([\w./~][\w./~-]*)/g, (match, rel: string) => {
     try {
-      const body = readFileSync(rel, "utf8");
+      // Confine to the workspace the same way read_file is; throws otherwise.
+      const abs = assertReadable(rel);
+      const st = statSync(abs);
+      if (!st.isFile()) return match;
+      let body = readFileSync(abs, "utf8");
+      if (body.length > MENTION_MAX_BYTES) {
+        body = body.slice(0, MENTION_MAX_BYTES) + "\n[...truncated]";
+      }
       return `${match}\n<file path="${rel}">\n${body}\n</file>`;
     } catch {
       return match;
