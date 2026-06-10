@@ -202,7 +202,7 @@ const ALL_TOOLS: Anthropic.Tool[] = [
   {
     name: "bash",
     description:
-      "Run a shell command in the current working directory and return its combined stdout/stderr. Use this for anything the file tools can't do: grep, git, running tests, installing packages, etc. Commands time out after 120s.",
+      "Run a shell command in the current working directory and return its combined stdout/stderr. Use this for anything the file tools can't do: grep, git, running tests, installing packages, etc. Commands time out after 120s by default (configurable via the SPRITE_BASH_TIMEOUT env var, in seconds).",
     input_schema: {
       type: "object",
       properties: {
@@ -1039,6 +1039,19 @@ function killTree(pid: number): void {
   } catch {}
 }
 
+const DEFAULT_BASH_TIMEOUT_S = 120;
+
+/**
+ * How long a bash command may run before it's killed. Defaults to 120s;
+ * override with SPRITE_BASH_TIMEOUT (whole seconds) for long installs/builds.
+ * Non-numeric or non-positive values fall back to the default.
+ */
+function bashTimeoutMs(): number {
+  const raw = process.env.SPRITE_BASH_TIMEOUT;
+  const secs = raw ? Number(raw) : NaN;
+  return (Number.isFinite(secs) && secs > 0 ? secs : DEFAULT_BASH_TIMEOUT_S) * 1000;
+}
+
 export function bash(
   command: string,
   signal?: AbortSignal,
@@ -1059,10 +1072,11 @@ export function bash(
     child.stdout.setEncoding("utf8").on("data", (d) => (out += d));
     child.stderr.setEncoding("utf8").on("data", (d) => (out += d));
 
+    const timeoutMs = bashTimeoutMs();
     const timer = setTimeout(() => {
-      killedBy = "timeout after 120s";
+      killedBy = `timeout after ${Math.round(timeoutMs / 1000)}s`;
       if (child.pid) killTree(child.pid);
-    }, 120_000);
+    }, timeoutMs);
 
     const onAbort = () => {
       killedBy = "aborted";
