@@ -1,4 +1,4 @@
-import { Fragment, type ReactNode } from "react";
+import { Fragment, useMemo, type ReactNode } from "react";
 import { Box, Text } from "ink";
 import { marked, type Token, type Tokens } from "marked";
 
@@ -9,7 +9,11 @@ import { marked, type Token, type Tokens } from "marked";
  * Anything unrecognised falls through to its raw text.
  */
 export function Markdown({ children }: { children: string }) {
-  const tokens = marked.lexer(children);
+  // Re-lexing the whole string is the cost here; memoize so a re-render that
+  // doesn't change the text (e.g. a sibling line updating) is free. While text
+  // is still streaming `children` changes each token, so that case still
+  // re-lexes — committed lines living in <Static> don't re-render at all.
+  const tokens = useMemo(() => marked.lexer(children), [children]);
   return (
     <Box flexDirection="column" gap={1}>
       {tokens
