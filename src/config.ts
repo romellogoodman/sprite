@@ -71,12 +71,25 @@ function projectKey(): string {
   return fs.realpathSync(process.cwd());
 }
 
+// Parsed projects.json is cached in memory — isBashAllowed/isWriteAllowed are
+// hit on every bash call and every out-of-tree write. Keyed by the file path
+// (which follows SPRITE_CONFIG_DIR) so test isolation still works. The cache
+// is owned by this process: writeProjects refreshes it, so it only goes stale
+// if another process edits the file, which the per-cwd keying makes moot.
+const projectsCache = new Map<string, ProjectsFile>();
+
 function readProjects(): ProjectsFile {
+  const file = projectsPath();
+  const cached = projectsCache.get(file);
+  if (cached) return cached;
+  let parsed: ProjectsFile;
   try {
-    return JSON.parse(fs.readFileSync(projectsPath(), "utf8")) as ProjectsFile;
+    parsed = JSON.parse(fs.readFileSync(file, "utf8")) as ProjectsFile;
   } catch {
-    return {};
+    parsed = {};
   }
+  projectsCache.set(file, parsed);
+  return parsed;
 }
 
 function writeProjects(p: ProjectsFile): void {
@@ -84,6 +97,7 @@ function writeProjects(p: ProjectsFile): void {
   fs.writeFileSync(projectsPath(), JSON.stringify(p, null, 2) + "\n", {
     mode: 0o600,
   });
+  projectsCache.set(projectsPath(), p);
 }
 
 // Shell control operators — commands containing these always require
