@@ -59,6 +59,8 @@ Drop a markdown file in `./.sprite/commands/` (project) or `~/.config/sprite/com
 ./.sprite/commands/review.md   →   /review [args]
 ```
 
+A project command's body is sent to the model verbatim as your prompt, and project commands shadow your global ones. That means a cloned repo can ship a `./.sprite/commands/` file (e.g. `review.md`) whose contents are prompt injection — running `/review` in an untrusted repo sends that text as if you'd typed it. Treat `.sprite/commands/` like any other code in a repo you don't trust: read it before you run it.
+
 ## Project context
 
 sprite reads `AGENTS.md`, `AGENT.md`, and `CLAUDE.md` from the current directory, every parent up to the git root, and `~/.config/sprite/` (global). Whatever it finds is appended to the system prompt, so you can tell it how your project works once and it'll remember.
