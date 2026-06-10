@@ -170,8 +170,8 @@ export function App({
     // apiKey state — this ref object is built on first render, possibly
     // before login. A thrown/missing key is caught in runBash and degrades
     // to the confirmation prompt.
-    classifyBash: (command) =>
-      classifyCommand(loadApiKey()!, command, process.cwd()),
+    classifyBash: (command, signal) =>
+      classifyCommand(loadApiKey()!, command, process.cwd(), signal),
     askQuestion: (questions) =>
       new Promise<QuestionAnswer[]>((resolve) => {
         setPendingQuestion({ questions, resolve });

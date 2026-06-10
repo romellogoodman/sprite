@@ -310,6 +310,18 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
 
 const RETRY_DELAYS_MS = [1_000, 3_000, 8_000];
 
+const CLASSIFY_TIMEOUT_MS = 15_000;
+
+/**
+ * Combine a deadline with an optional caller signal so a hung side-call (the
+ * auto-mode classifier, a compaction) can't block the turn forever. Returns a
+ * signal that aborts on whichever fires first.
+ */
+function withTimeout(ms: number, signal?: AbortSignal): AbortSignal {
+  const timeout = AbortSignal.timeout(ms);
+  return signal ? AbortSignal.any([signal, timeout]) : timeout;
+}
+
 /**
  * Run `fn`, retrying on transient API errors with short backoff. `canRetry`
  * gates it — the caller flips it false once content has streamed to the UI, so
@@ -435,9 +447,12 @@ function findCutPoint(history: Anthropic.MessageParam[]): number {
  * survive. If no sensible cut point exists, fall back to summarizing
  * everything (the old behavior).
  */
+const COMPACT_TIMEOUT_MS = 60_000;
+
 export async function compactHistory(
   apiKey: string,
   history: Anthropic.MessageParam[],
+  signal?: AbortSignal,
 ): Promise<Anthropic.MessageParam[]> {
   if (history.length === 0) return history;
 
@@ -446,15 +461,18 @@ export async function compactHistory(
   const tail = cut > 0 ? history.slice(cut) : [];
 
   const client = new Anthropic({ apiKey });
-  const resp = await client.messages.create({
-    model: model(),
-    max_tokens: 4000,
-    system: COMPACT_PROMPT,
-    messages: [
-      ...head,
-      { role: "user", content: "Summarize the conversation above for handoff." },
-    ],
-  });
+  const resp = await client.messages.create(
+    {
+      model: model(),
+      max_tokens: 4000,
+      system: COMPACT_PROMPT,
+      messages: [
+        ...head,
+        { role: "user", content: "Summarize the conversation above for handoff." },
+      ],
+    },
+    { signal: withTimeout(COMPACT_TIMEOUT_MS, signal) },
+  );
   const summary = resp.content
     .filter((b): b is Anthropic.TextBlock => b.type === "text")
     .map((b) => b.text)
@@ -494,19 +512,23 @@ export async function classifyCommand(
   apiKey: string,
   command: string,
   cwd: string = process.cwd(),
+  signal?: AbortSignal,
 ): Promise<{ allow: boolean; reason?: string }> {
   const projectContext = loadProjectContext(cwd);
   const client = new Anthropic({ apiKey });
-  const resp = await client.messages.create({
-    model: DEFAULT_MODEL,
-    max_tokens: 100,
-    system:
-      CLASSIFY_PROMPT +
-      (projectContext
-        ? `\n\nProject instructions that may tighten this:\n${projectContext}`
-        : ""),
-    messages: [{ role: "user", content: `cwd: ${cwd}\ncommand: ${command}` }],
-  });
+  const resp = await client.messages.create(
+    {
+      model: DEFAULT_MODEL,
+      max_tokens: 100,
+      system:
+        CLASSIFY_PROMPT +
+        (projectContext
+          ? `\n\nProject instructions that may tighten this:\n${projectContext}`
+          : ""),
+      messages: [{ role: "user", content: `cwd: ${cwd}\ncommand: ${command}` }],
+    },
+    { signal: withTimeout(CLASSIFY_TIMEOUT_MS, signal) },
+  );
   const text = resp.content
     .filter((b): b is Anthropic.TextBlock => b.type === "text")
     .map((b) => b.text)
@@ -688,7 +710,7 @@ export async function runTurn(
       const before = messages.length;
       const pct = Math.round((100 * inputTokens) / window);
       try {
-        messages = await compactHistory(apiKey, messages);
+        messages = await compactHistory(apiKey, messages, signal);
         onEvent({ type: "compacted", before, after: messages.length, pct });
       } catch {
         // best effort; keep going with the uncompacted history

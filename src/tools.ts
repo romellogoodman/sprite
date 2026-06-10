@@ -416,6 +416,7 @@ export type ToolContext = {
    */
   classifyBash?: (
     command: string,
+    signal?: AbortSignal,
   ) => Promise<{ allow: boolean; reason?: string }>;
   /** Show multiple-choice questions and resolve with the answers. */
   askQuestion: (questions: Question[]) => Promise<QuestionAnswer[]>;
@@ -576,7 +577,7 @@ async function runBash(
   if (ctx.getMode() === "auto") {
     const verdict = ctx.classifyBash
       ? await ctx
-          .classifyBash(command)
+          .classifyBash(command, signal)
           .catch(() => ({ allow: false, reason: "classifier unavailable" }))
       : { allow: false, reason: "no classifier configured" };
     if (verdict.allow) return await run();
