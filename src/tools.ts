@@ -799,7 +799,11 @@ function renderDiff(content: string, oldStr: string, newStr: string): string {
  * pre-flight DNS check would leave open. Redirects are followed manually so
  * every hop goes through the same gate.
  */
-const FETCH_MAX_BYTES = 5 * 1024 * 1024;
+// The tool output is capped at MAX_OUTPUT (50KB) by capTail regardless, and
+// HTML collapses heavily once stripped to text, so there's no reason to buffer
+// megabytes first. 512KB of raw bytes leaves ample headroom for that ratio
+// while bounding how much a hostile/huge page can balloon in memory.
+const FETCH_MAX_BYTES = 512 * 1024;
 const FETCH_TIMEOUT_MS = 15_000;
 const FETCH_MAX_REDIRECTS = 5;
 
