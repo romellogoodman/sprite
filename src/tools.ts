@@ -31,18 +31,56 @@ function workspaceRoot(): string {
   }
 }
 
-const WORKSPACE = workspaceRoot();
-// Realpath so a symlinked checkout (~/code -> /Volumes/dev/code) still
-// compares equal to realpath'd read targets below.
-const WORKSPACE_REAL = (() => {
-  try {
-    return fs.realpathSync(WORKSPACE);
-  } catch {
-    return WORKSPACE;
+/**
+ * Canonical on-disk identity of a path that may not exist yet: realpath the
+ * deepest existing ancestor and re-append the missing tail. A symlink at that
+ * deepest point (dangling or not) is followed by hand so the result names
+ * where bytes would actually land, not where the link sits. `.native` walks
+ * components the way the kernel does — the JS realpath collapses `..`
+ * lexically before resolving a preceding symlink. Every confinement check
+ * (reads, writes, the config-dir refusal) runs on this, and writes go to
+ * this path, so a check-here-write-there gap can't open up.
+ */
+function canonicalPath(abs: string, hops = 0): string {
+  const tail: string[] = [];
+  let existing = abs;
+  let st: fs.Stats;
+  for (;;) {
+    try {
+      st = fs.lstatSync(existing);
+      break;
+    } catch {
+      const parent = path.dirname(existing);
+      // Walked off the root without finding anything — nothing to resolve.
+      if (parent === existing) return abs;
+      tail.unshift(path.basename(existing));
+      existing = parent;
+    }
   }
-})();
+  if (st.isSymbolicLink()) {
+    if (hops > 32) throw new Error(`Too many levels of symbolic links: ${abs}`);
+    const target = path.resolve(
+      path.dirname(existing),
+      fs.readlinkSync(existing),
+    );
+    return canonicalPath(path.join(target, ...tail), hops + 1);
+  }
+  try {
+    return path.join(fs.realpathSync.native(existing), ...tail);
+  } catch {
+    return abs;
+  }
+}
+
+const WORKSPACE = workspaceRoot();
+// Canonical so a symlinked checkout (~/code -> /Volumes/dev/code) still
+// compares equal to the canonicalized read/write targets below.
+const WORKSPACE_REAL = canonicalPath(WORKSPACE);
 // Read lazily so SPRITE_CONFIG_DIR set by tests (or per-run) is honored.
 const CONFIG_DIR = () => configDir();
+// Canonical form of the config dir, so a symlink *to* it (or a symlinked
+// ~/.config) can't route around the hard refusal.
+const CONFIG_DIR_REAL = () => canonicalPath(CONFIG_DIR());
 
 function isInside(child: string, parent: string): boolean {
   const rel = path.relative(parent, child);
@@ -56,15 +94,20 @@ function isInside(child: string, parent: string): boolean {
  * grant itself silent writes on the next call (privilege escalation).
  */
 function assertNotConfigDir(abs: string): void {
-  const cfg = CONFIG_DIR();
+  const cfg = CONFIG_DIR_REAL();
   if (isInside(abs, cfg) || abs === cfg) {
     throw new Error(`Refusing to edit sprite's own config: ${abs}`);
   }
 }
 
-/** Is this resolved path inside the workspace (or equal to its root)? */
+/**
+ * Is this canonical path inside the workspace (or equal to its root)?
+ * Compared against the canonical root, so callers must pass a path that went
+ * through `canonicalPath` — a lexical path would false-negative under a
+ * symlinked checkout and false-positive for an in-tree symlink pointing out.
+ */
 function isInWorkspace(abs: string): boolean {
-  return isInside(abs, WORKSPACE) || abs === WORKSPACE;
+  return isInside(abs, WORKSPACE_REAL) || abs === WORKSPACE_REAL;
 }
 
 /**
@@ -77,13 +120,8 @@ function isInWorkspace(abs: string): boolean {
  */
 export function assertReadable(relPath: string): string {
   const abs = path.resolve(relPath);
-  let real = abs;
-  try {
-    real = fs.realpathSync(abs);
-  } catch {
-    // Doesn't exist / can't stat — readFile will throw a clearer error.
-  }
-  const cfg = CONFIG_DIR();
+  const real = canonicalPath(abs);
+  const cfg = CONFIG_DIR_REAL();
   if (isInside(real, cfg) || real === cfg) {
     throw new Error(`Refusing to read sprite's own config: ${abs}`);
   }
@@ -665,7 +703,11 @@ async function editFile(
   edits: EditPair[],
   ctx: ToolContext,
 ): Promise<string> {
-  const abs = path.resolve(relPath);
+  // Canonicalize before any check and write to the canonical path. A symlink
+  // committed in a cloned repo (`repo/cfg -> ~/.config/sprite`, or `-> ~`)
+  // would otherwise pass both checks below on its lexical spelling and land
+  // the bytes outside the tree with no prompt.
+  const abs = canonicalPath(path.resolve(relPath));
   // Sprite's own config is never writable, regardless of trust or allowlist.
   // Done first so no confirmation path can reach it.
   assertNotConfigDir(abs);

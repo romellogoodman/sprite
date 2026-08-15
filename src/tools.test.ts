@@ -219,6 +219,112 @@ describe("edit_file — sandboxing", () => {
 });
 
 /**
+ * Symlinks are the way a cloned repo reaches outside itself: git stores
+ * them, so a hostile checkout can ship `cfg -> ~/.config/sprite`. Every
+ * check must run on where the bytes would actually land, not on the
+ * lexical spelling under the repo. These were a real bypass before
+ * canonicalization was added to the write path.
+ */
+describe("edit_file — symlinks resolve before every check", () => {
+  let outTmp: string;
+  before(() => {
+    outTmp = fs.mkdtempSync(path.join(os.tmpdir(), "sprite-symlink-"));
+  });
+  after(() => {
+    fs.rmSync(outTmp, { recursive: true, force: true });
+  });
+
+  test("in-tree symlink to the config dir is refused (never gateable)", async () => {
+    // Works whether or not the config dir exists: a dangling link still
+    // canonicalizes to the config path, which is what the refusal keys on.
+    fs.symlinkSync(configDir(), abs("link-cfg"));
+    const approveAllCtx: ToolContext = {
+      ...headlessContext(),
+      trust: true,
+      confirmWrite: async () => "always",
+    };
+    await assert.rejects(
+      executeTool(
+        "edit_file",
+        { path: rel("link-cfg/hacked.txt"), old_str: "", new_str: "hi" },
+        approveAllCtx,
+      ),
+      /sprite's own config/,
+    );
+    assert.equal(fs.existsSync(path.join(configDir(), "hacked.txt")), false);
+  });
+
+  test("in-tree symlink to a dir outside the workspace goes through the gate", async () => {
+    fs.symlinkSync(outTmp, abs("link-out"));
+    let asked = 0;
+    const denyCtx: ToolContext = {
+      ...headlessContext(),
+      confirmWrite: async () => {
+        asked += 1;
+        return "no";
+      },
+    };
+    await assert.rejects(
+      executeTool(
+        "edit_file",
+        { path: rel("link-out/pwned.txt"), old_str: "", new_str: "x\n" },
+        denyCtx,
+      ),
+      /denied/,
+    );
+    assert.equal(asked, 1);
+    assert.equal(fs.existsSync(path.join(outTmp, "pwned.txt")), false);
+  });
+
+  test("dangling in-tree symlink to an outside file goes through the gate", async () => {
+    // writeFileSync on a dangling link creates the target — so the check has
+    // to follow the link by hand even though nothing exists at its end yet.
+    const ghost = path.join(outTmp, "ghost.txt");
+    fs.symlinkSync(ghost, abs("link-dangling"));
+    const denyCtx: ToolContext = {
+      ...headlessContext(),
+      confirmWrite: async () => "no",
+    };
+    await assert.rejects(
+      executeTool(
+        "edit_file",
+        { path: rel("link-dangling"), old_str: "", new_str: "x\n" },
+        denyCtx,
+      ),
+      /denied/,
+    );
+    assert.equal(fs.existsSync(ghost), false);
+  });
+
+  test("in-tree symlink to an in-tree dir writes silently (no false prompt)", async () => {
+    fs.mkdirSync(abs("real-dir"));
+    fs.symlinkSync(abs("real-dir"), abs("link-in"));
+    const neverAskCtx: ToolContext = {
+      ...headlessContext(),
+      confirmWrite: async () => {
+        throw new Error("confirmWrite must not be called for in-tree targets");
+      },
+    };
+    const out = await executeTool(
+      "edit_file",
+      { path: rel("link-in/note.txt"), old_str: "", new_str: "ok\n" },
+      neverAskCtx,
+    );
+    assert.match(out, /Created/);
+    assert.equal(fs.readFileSync(abs("real-dir/note.txt"), "utf8"), "ok\n");
+  });
+
+  test("read_file through an in-tree symlink pointing outside is refused", async () => {
+    fs.writeFileSync(path.join(outTmp, "secret.txt"), "s3cret\n");
+    fs.symlinkSync(path.join(outTmp, "secret.txt"), abs("link-secret"));
+    await assert.rejects(
+      executeTool("read_file", { path: rel("link-secret") }, ctx),
+      /outside the workspace/,
+    );
+  });
+});
+
+/**
  * The out-of-workspace write gate mirrors the bash confirmation flow:
  * trust bypasses, allowlist matches bypass, otherwise ctx.confirmWrite
  * decides. These tests drive it directly via mock ctx; persistence of
@@ -286,9 +392,14 @@ describe("edit_file — out-of-workspace writes", () => {
       yesCtx,
     );
     assert.equal(fs.readFileSync(target, "utf8"), "once\n");
-    // The absolute path is what the prompt sees — critical for the human to
-    // recognize what's being approved.
-    assert.equal(askedFor, target);
+    // The prompt sees the canonical absolute path — where the bytes actually
+    // land — so a symlink can't make an out-of-tree write look in-tree to
+    // the human approving it. (On macOS os.tmpdir() is under /var, which is
+    // itself a symlink to /private/var.)
+    assert.equal(
+      askedFor,
+      path.join(fs.realpathSync.native(outTmp), "one-shot.md"),
+    );
   });
 
   test("confirmWrite asked exactly once per call (not re-asked mid-write)", async () => {
