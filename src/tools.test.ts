@@ -12,7 +12,12 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
-import { executeTool, headlessContext, type ToolContext } from "./tools.js";
+import {
+  TOOLS,
+  executeTool,
+  headlessContext,
+  type ToolContext,
+} from "./tools.js";
 import { configDir } from "./config.js";
 
 const SCRATCH = path.join(process.cwd(), ".test-tmp");
@@ -318,5 +323,24 @@ describe("edit_file — out-of-workspace writes", () => {
       yesCtx,
     );
     assert.equal(fs.readFileSync(target, "utf8"), "abs\n");
+  });
+});
+
+/**
+ * The tool list is part of the cached prompt prefix (tools → system →
+ * messages). If it varied by permission mode, every shift+tab flip would
+ * re-bill the whole conversation. So the list is constant and mode-specific
+ * behavior is enforced at execution time instead.
+ */
+describe("tool list is mode-independent", () => {
+  test("exit_plan_mode is always listed and refused outside plan mode", async () => {
+    assert.ok(TOOLS.some((t) => t.name === "exit_plan_mode"));
+    const defaultCtx: ToolContext = { ...ctx, getMode: () => "default" };
+    const out = await executeTool(
+      "exit_plan_mode",
+      { plan: "# Plan\n- do the thing" },
+      defaultCtx,
+    );
+    assert.match(out, /Refused: exit_plan_mode/);
   });
 });

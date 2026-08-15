@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import Anthropic from "@anthropic-ai/sdk";
 import {
-  toolsForMode,
+  TOOLS,
   executeTool,
   assertReadable,
   type PermissionMode,
@@ -597,7 +597,7 @@ export async function runTurn(
             max_tokens: 16000,
             ...modelParams(),
             system: cachedSystem(system),
-            tools: cachedTools(toolsForMode(ctx.getMode())),
+            tools: cachedTools(TOOLS),
             messages: withCacheMarker(messages),
           },
           { signal },

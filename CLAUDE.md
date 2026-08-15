@@ -65,7 +65,7 @@ Bash is spawned with a narrow env whitelist by default (`SAFE_ENV_KEYS` in `tool
 
 ## Prompt caching
 
-`runTurn` sets three cache breakpoints per request (see `cachedSystem`/`cachedTools`/`withCacheMarker` in agent.ts): the last tool def, the system block, and the final content block of the last message — the moving marker means the whole growing history re-reads from cache each round-trip. The mode reminder is injected into the user message, not the system prompt, so shift+tab flips don't bust the cache. Don't add anything per-turn-variable to the system prompt or tool defs.
+`runTurn` sets three cache breakpoints per request (see `cachedSystem`/`cachedTools`/`withCacheMarker` in agent.ts): the last tool def, the system block, and the final content block of the last message — the moving marker means the whole growing history re-reads from cache each round-trip. The mode reminder is injected into the user message, not the system prompt, so shift+tab flips don't bust the cache. The tool list (`TOOLS`) is the same in every mode for the same reason — tools are the *first* segment of the prefix, so a mode-dependent list would invalidate tools, system, and every message on the flip; `exit_plan_mode` stays listed and is refused at execution outside plan mode. Don't add anything per-turn-variable to the system prompt or tool defs.
 
 ## Principles
 

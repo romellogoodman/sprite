@@ -111,15 +111,13 @@ export type PlanDecision =
   | { approved: false; feedback: string };
 
 /**
- * Tool list filtered to the current permission mode. exit_plan_mode is only
- * visible in plan mode so the model can't call it from default mode.
+ * The tool list is identical in every permission mode. exit_plan_mode stays
+ * listed outside plan mode and is refused at execution instead: tools are the
+ * first segment of the cached prompt prefix, so a list that changed on a
+ * shift+tab flip would invalidate tools, system, and every message on the
+ * next request. Mode-specific guidance lives in the per-turn mode reminder.
  */
-export function toolsForMode(mode: PermissionMode): Anthropic.Tool[] {
-  if (mode === "plan") return ALL_TOOLS;
-  return ALL_TOOLS.filter((t) => t.name !== "exit_plan_mode");
-}
-
-const ALL_TOOLS: Anthropic.Tool[] = [
+export const TOOLS: Anthropic.Tool[] = [
   {
     name: "read_file",
     description:
@@ -308,7 +306,7 @@ const ALL_TOOLS: Anthropic.Tool[] = [
   {
     name: "exit_plan_mode",
     description:
-      "Call this when you are in plan mode and the plan is ready for user approval. Pass the full plan as markdown in the `plan` argument; the user will see it and approve or reject. On approval, plan mode ends and you can make edits. On rejection, you stay in plan mode and the user's feedback comes back as the tool result. Do NOT use ask_user_question to ask 'is the plan ready?' — that's exactly what this tool is for. Only available in plan mode.",
+      "Call this when you are in plan mode and the plan is ready for user approval. Pass the full plan as markdown in the `plan` argument; the user will see it and approve or reject. On approval, plan mode ends and you can make edits. On rejection, you stay in plan mode and the user's feedback comes back as the tool result. Do NOT use ask_user_question to ask 'is the plan ready?' — that's exactly what this tool is for. Only usable in plan mode; outside it the call is refused.",
     input_schema: {
       type: "object",
       properties: {
